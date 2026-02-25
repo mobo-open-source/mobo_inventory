@@ -81,7 +81,7 @@ Tested and verified on:
 1. **Clone the repository**
    ```bash
    git clone https://github.com/mobo-open-source/mobo_inventory.git
-   cd mobo_inv_app
+   cd mobo_inventory
    ```
 
 2. **Install dependencies**
