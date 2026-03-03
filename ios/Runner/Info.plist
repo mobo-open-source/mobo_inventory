@@ -2,6 +2,8 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>CADisableMinimumFrameDurationOnPhone</key>
+	<true/>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
@@ -22,7 +24,59 @@
 	<string>????</string>
 	<key>CFBundleVersion</key>
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
+	<key>LSApplicationQueriesSchemes</key>
+	<array>
+		<string>mailto</string>
+		<string>tel</string>
+		<string>sms</string>
+		<string>http</string>
+		<string>https</string>
+	</array>
 	<key>LSRequiresIPhoneOS</key>
+	<true/>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+	</dict>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>We need Bluetooth access to connect to and print from wireless printers.</string>
+	<key>NSBluetoothPeripheralUsageDescription</key>
+	<string>We need Bluetooth access to connect to and print from wireless printers.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>We use the camera to scan barcodes and capture photos.</string>
+	<key>NSFaceIDUsageDescription</key>
+	<string>We need Face ID permission to authenticate you securely and protect your data</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>We use the microphone to capture your voice for search and commands.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>We need permission to save images to your photo library.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>We need access to your photo library to let you pick and attach images.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>We use speech recognition to transcribe your voice for search and inputs.</string>
+	<key>UIApplicationSceneManifest</key>
+	<dict>
+		<key>UIApplicationSupportsMultipleScenes</key>
+		<false/>
+		<key>UISceneConfigurations</key>
+		<dict>
+			<key>UIWindowSceneSessionRoleApplication</key>
+			<array>
+				<dict>
+					<key>UISceneClassName</key>
+					<string>UIWindowScene</string>
+					<key>UISceneConfigurationName</key>
+					<string>flutter</string>
+					<key>UISceneDelegateClassName</key>
+					<string>FlutterSceneDelegate</string>
+					<key>UISceneStoryboardFile</key>
+					<string>Main</string>
+				</dict>
+			</array>
+		</dict>
+	</dict>
+	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
@@ -40,48 +94,6 @@
 		<string>UIInterfaceOrientationPortraitUpsideDown</string>
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
-	</array>
-	<key>CADisableMinimumFrameDurationOnPhone</key>
-	<true/>
-	<key>UIApplicationSupportsIndirectInputEvents</key>
-	<true/>
-	<key>NSFaceIDUsageDescription</key>
-	<string>We need Face ID permission to authenticate you securely and protect your data</string>
-	<!-- Camera for barcode scanning and capturing images -->
-	<key>NSCameraUsageDescription</key>
-	<string>We use the camera to scan barcodes and capture photos.</string>
-	<!-- Microphone and Speech Recognition for voice search/input (if enabled) -->
-	<key>NSMicrophoneUsageDescription</key>
-	<string>We use the microphone to capture your voice for search and commands.</string>
-	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>We use speech recognition to transcribe your voice for search and inputs.</string>
-	<!-- Photo Library access for picking and saving images -->
-	<key>NSPhotoLibraryUsageDescription</key>
-	<string>We need access to your photo library to let you pick and attach images.</string>
-	<key>NSPhotoLibraryAddUsageDescription</key>
-	<string>We need permission to save images to your photo library.</string>
-	<!-- Bluetooth for printing (if using Bluetooth printers) -->
-	<key>NSBluetoothAlwaysUsageDescription</key>
-	<string>We need Bluetooth access to connect to and print from wireless printers.</string>
-	<key>NSBluetoothPeripheralUsageDescription</key>
-	<string>We need Bluetooth access to connect to and print from wireless printers.</string>
-
-	<!-- App Transport Security: allow non-HTTPS Odoo servers during development.
-	     Consider restricting this by adding specific exception domains in production. -->
-	<key>NSAppTransportSecurity</key>
-	<dict>
-		<key>NSAllowsArbitraryLoads</key>
-		<true/>
-	</dict>
-
-	<!-- Allow querying availability of URL schemes (iOS 9+ canOpenURL restrictions) -->
-	<key>LSApplicationQueriesSchemes</key>
-	<array>
-		<string>mailto</string>
-		<string>tel</string>
-		<string>sms</string>
-		<string>http</string>
-		<string>https</string>
 	</array>
 </dict>
 </plist>
