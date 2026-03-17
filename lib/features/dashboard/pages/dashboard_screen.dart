@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:hugeicons/hugeicons.dart';
 import 'package:provider/provider.dart';
+import '../../../shared/services/review_service.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/utils/base64_utils.dart';
 import '../providers/dashboard_provider.dart';
@@ -39,9 +40,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
       final provider = context.read<DashboardProvider>();
       _fetchData(provider);
+      await ReviewService().trackAppOpen();
+      if (context.mounted) {
+        ReviewService().checkAndShowRating(context);
+      }
     });
   }
 
