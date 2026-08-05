@@ -155,6 +155,7 @@ class DashboardService {
         'args': [
           [
             ['quantity', '<', 0],
+            ['location_id.usage', '=', 'internal'],
           ],
         ],
         'kwargs': {},
@@ -226,6 +227,7 @@ class DashboardService {
         'args': [
           [
             ['quantity', '<', 0],
+            ['location_id.usage', '=', 'internal'],
           ],
         ],
         'kwargs': {
