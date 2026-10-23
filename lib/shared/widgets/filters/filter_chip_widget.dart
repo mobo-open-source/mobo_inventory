@@ -34,25 +34,21 @@ class FilterChipWidget extends StatelessWidget {
         ),
       ),
 
-      backgroundColor: isDark
-          ? const Color(0xFF2A2A2A)
-          : const Color(0xFFFCE4EC),
+      // §5 pill/chip button — quick filters.
+      backgroundColor: isDark ? Colors.grey.shade800 : Colors.grey.shade200,
       selectedColor: primaryColor,
 
       showCheckmark: true,
       checkmarkColor: Colors.white,
 
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(8),
-        side: BorderSide(
-          color: isDark ? Colors.grey.shade700 : Colors.grey.shade400,
-          width: 1,
-        ),
+        borderRadius: BorderRadius.circular(20),
+        side: BorderSide.none,
       ),
 
       materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
       visualDensity: VisualDensity.compact,
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
       labelPadding: const EdgeInsets.symmetric(horizontal: 6),
 
       elevation: 0,

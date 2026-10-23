@@ -3,17 +3,19 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 import 'package:hugeicons/hugeicons.dart';
-import '../../../core/routing/app_routes.dart';
 import '../../../shared/widgets/loaders/list_shimmer.dart';
 import '../../../shared/widgets/pagination/pagination_controls.dart';
 import '../providers/warehouse_provider.dart';
 import '../widgets/warehouse_list_tile.dart';
 import '../models/warehouse_model.dart';
-import '../widgets/warehouse_filter_bottom_sheet.dart';
 import '../widgets/warehouse_group_tile.dart';
 import '../../../shared/widgets/empty_state.dart';
+import '../../../core/services/error_manager.dart';
 import '../../../shared/widgets/filters/active_filters_badge.dart';
 import '../../../shared/widgets/filters/group_by_pill.dart';
+import '../../../shared/widgets/filters/premium_filter_bottom_sheet.dart';
+import '../../../shared/widgets/layout/collapsible_header_layout.dart';
+import '../../../shared/widgets/search/mobo_search_filter_bar.dart';
 
 /// A screen displaying a searchable and filterable list of all warehouses.
 ///
@@ -29,7 +31,6 @@ class WarehouseListScreen extends StatefulWidget {
 
 class _WarehouseListScreenState extends State<WarehouseListScreen> {
   final TextEditingController _searchController = TextEditingController();
-  final ScrollController _scrollController = ScrollController();
   Timer? _debounce;
 
   @override
@@ -48,7 +49,6 @@ class _WarehouseListScreenState extends State<WarehouseListScreen> {
     _debounce?.cancel();
     _searchController.removeListener(_onSearchChanged);
     _searchController.dispose();
-    _scrollController.dispose();
     super.dispose();
   }
 
@@ -67,20 +67,74 @@ class _WarehouseListScreenState extends State<WarehouseListScreen> {
     await provider.refresh();
   }
 
-  void _showFilters() {
+  void _clearAllFilters() {
+    _searchController.clear();
     final provider = context.read<WarehouseProvider>();
-    showModalBottomSheet(
+    provider.clearFilters();
+    provider.fetchWarehouses(forceRefresh: true);
+  }
+
+  static String _snake(String s) => s.toLowerCase().replaceAll(' ', '_');
+
+  void _showFilterBottomSheet() {
+    final provider = context.read<WarehouseProvider>();
+
+    final filterOptionsGroup = FilterGroup(
+      title: 'Filter Options',
+      options: [
+        FilterOption(
+          title: 'Has Stock Location',
+          value: provider.filterHasStockLocation,
+        ),
+        FilterOption(title: 'Has Code', value: provider.filterHasCode),
+      ],
+    );
+
+    final groupByGroup = FilterGroup(
+      title: 'Group By',
+      options: [
+        FilterOption(
+          title: 'Company',
+          subtitle: 'Group by company',
+          value: provider.selectedGroupBy == 'company',
+        ),
+        FilterOption(
+          title: 'Code',
+          subtitle: 'Group by short code',
+          value: provider.selectedGroupBy == 'code',
+        ),
+        FilterOption(
+          title: 'Name (A-Z)',
+          subtitle: 'Group by first letter of name',
+          value: provider.selectedGroupBy == 'name:letter',
+        ),
+      ],
+    );
+
+    PremiumFilterBottomSheet.show(
       context: context,
-      isScrollControlled: true,
-      useRootNavigator: true,
-      backgroundColor: Colors.transparent,
-      builder: (sheetContext) => WarehouseFilterBottomSheet(
-        provider: provider,
-        onClearSearch: () {
-          _searchController.clear();
-          provider.fetchWarehouses(searchQuery: '');
-        },
-      ),
+      title: 'Filter & Group By',
+      filterGroups: [filterOptionsGroup],
+      groupByOptions: [groupByGroup],
+      onApply: (values) {
+        final hasStockLocation =
+            values['filter_options_${_snake('Has Stock Location')}'] == true;
+        final hasCode = values['filter_options_${_snake('Has Code')}'] == true;
+
+        String? groupBy;
+        if (values['group_by_${_snake('Company')}'] == true) {
+          groupBy = 'company';
+        } else if (values['group_by_${_snake('Code')}'] == true) {
+          groupBy = 'code';
+        } else if (values['group_by_${_snake('Name (A-Z)')}'] == true) {
+          groupBy = 'name:letter';
+        }
+
+        provider.setGroupBy(groupBy);
+        provider.setFilterHasStockLocation(hasStockLocation);
+        provider.setFilterHasCode(hasCode);
+        provider.fetchWarehouses(forceRefresh: true);
+      },
     );
   }
 
@@ -120,13 +174,19 @@ class _WarehouseListScreenState extends State<WarehouseListScreen> {
     );
   }
 
+  bool _hasActiveFilter(WarehouseProvider provider) {
+    return provider.filterHasStockLocation ||
+        provider.filterHasCode ||
+        _searchController.text.trim().isNotEmpty;
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
+    final provider = context.watch<WarehouseProvider>();
 
     return Scaffold(
-      backgroundColor: theme.scaffoldBackgroundColor,
       appBar: widget.asTab
           ? null
           : AppBar(
@@ -148,223 +208,168 @@ class _WarehouseListScreenState extends State<WarehouseListScreen> {
               ),
             ),
 
-      body: Column(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(16),
-            color: theme.scaffoldBackgroundColor,
-            child: TextField(
-              controller: _searchController,
-              onSubmitted: (val) {
-                context.read<WarehouseProvider>().fetchWarehouses(
-                  searchQuery: val.trim(),
-                );
-              },
-              decoration: InputDecoration(
+      body: CollapsibleHeaderLayout(
+        header: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(16),
+              color: theme.scaffoldBackgroundColor,
+              child: MoboSearchFilterBar(
+                controller: _searchController,
                 hintText: 'Search warehouses...',
-                prefixIcon: IconButton(
-                  icon: Icon(
-                    HugeIcons.strokeRoundedFilterHorizontal,
-                    color: isDark ? Colors.grey[400] : Colors.grey[600],
-                    size: 18,
-                  ),
-                  onPressed: _showFilters,
-                  tooltip: 'Filter & Group By',
-                ),
-                suffixIcon: _searchController.text.isNotEmpty
-                    ? IconButton(
-                        icon: Icon(
-                          Icons.clear,
-                          color: isDark ? Colors.grey[400] : Colors.grey,
-                        ),
-                        onPressed: () {
-                          _searchController.clear();
-                          context.read<WarehouseProvider>().fetchWarehouses(
-                            searchQuery: '',
-                          );
-                        },
-                      )
-                    : null,
-                filled: true,
-                fillColor: isDark ? Colors.grey[850] : Colors.white,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide.none,
-                ),
-                contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 12,
-                ),
-                isDense: true,
+                hasActiveFilter: _hasActiveFilter(provider),
+                onFilterTap: _showFilterBottomSheet,
+                onChanged: (_) => setState(() {}),
               ),
             ),
-          ),
 
-          Consumer<WarehouseProvider>(
-            builder: (_, provider, __) {
-              return Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Expanded(
-                      child: SingleChildScrollView(
-                        scrollDirection: Axis.horizontal,
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            _buildActiveFiltersBadge(
-                              provider,
-                              theme,
-                              _searchController,
-                            ),
-                            if (provider.selectedGroupBy != null) ...[
-                              const SizedBox(width: 8),
-                              _buildGroupByPill(
-                                theme,
-                                provider.selectedGroupBy,
-                              ),
-                            ],
-                          ],
-                        ),
-                      ),
-                    ),
-                    if (provider.totalCount > 0 &&
-                        provider.warehouses.isNotEmpty)
-                      PaginationControls(
-                        canGoToPreviousPage: provider.canGoToPreviousPage,
-                        canGoToNextPage: provider.canGoToNextPage,
-                        onPreviousPage: provider.goToPreviousPage,
-                        onNextPage: provider.goToNextPage,
-                        paginationText: provider.getPaginationText(),
-                        isDark: isDark,
-                        theme: theme,
-                      ),
-                  ],
-                ),
-              );
-            },
-          ),
-
-          Expanded(
-            child: Consumer<WarehouseProvider>(
+            Consumer<WarehouseProvider>(
               builder: (_, provider, __) {
-                if (provider.isLoading && provider.warehouses.isEmpty) {
-                  return ListShimmer.buildListShimmer(
-                    context,
-                    itemCount: 8,
-                    type: ShimmerType.standard,
-                  );
-                }
-
-                if (provider.error != null && provider.warehouses.isEmpty) {
-                  final err = provider.error!.toLowerCase();
-                  final isModuleNotInstalled =
-                      err.contains('module') && err.contains('not installed');
-                  final title = isModuleNotInstalled
-                      ? 'Feature unavailable'
-                      : 'Something went wrong';
-                  final subtitle = isModuleNotInstalled
-                      ? 'This module is not installed on your server. Please contact your administrator.'
-                      : 'Pull to refresh or tap retry';
-                  final lottiePath = isModuleNotInstalled
-                      ? 'assets/lotties/socialv no data.json'
-                      : 'assets/lotties/Error 404.json';
-
-                  return RefreshIndicator(
-                    onRefresh: _refreshWarehouses,
-                    child: ListView(
-                      children: [
-                        const SizedBox(height: 48),
-                        EmptyState(
-                          title: title,
-                          subtitle: subtitle,
-                          lottieAsset: lottiePath,
-                          actionLabel: 'Retry',
-                          onAction: _refreshWarehouses,
-                        ),
-                      ],
-                    ),
-                  );
-                }
-
-                if (provider.warehouses.isEmpty) {
-                  final hasSearch = _searchController.text.trim().isNotEmpty;
-
-                  return ListView(
+                return Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      const SizedBox(height: 48),
-                      EmptyState(
-                        title: 'No warehouses found',
-                        subtitle: hasSearch
-                            ? 'Try adjusting your search'
-                            : 'Warehouses will appear here',
-                        lottieAsset: 'assets/lotties/empty ghost.json',
-                        actionLabel: hasSearch ? 'Clear Search' : 'Refresh',
-                        onAction: hasSearch
-                            ? () {
-                                _searchController.clear();
-                                provider.fetchWarehouses(searchQuery: '');
-                              }
-                            : _refreshWarehouses,
+                      Expanded(
+                        child: SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              _buildActiveFiltersBadge(
+                                provider,
+                                theme,
+                                _searchController,
+                              ),
+                              if (provider.selectedGroupBy != null) ...[
+                                const SizedBox(width: 8),
+                                _buildGroupByPill(
+                                  theme,
+                                  provider.selectedGroupBy,
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
                       ),
-                    ],
-                  );
-                }
-
-                final groupBy = provider.selectedGroupBy;
-
-                if (groupBy == null) {
-                  return RefreshIndicator(
-                    onRefresh: _refreshWarehouses,
-                    child: ListView.builder(
-                      controller: _scrollController,
-                      padding: const EdgeInsets.all(16),
-                      itemCount: provider.warehouses.length,
-                      itemBuilder: (context, index) {
-                        final warehouse = provider.warehouses[index];
-                        return WarehouseListTile(
-                          key: ValueKey(warehouse.id),
-                          warehouse: warehouse,
+                      if (provider.totalCount > 0 &&
+                          provider.warehouses.isNotEmpty)
+                        PaginationControls(
+                          canGoToPreviousPage: provider.canGoToPreviousPage,
+                          canGoToNextPage: provider.canGoToNextPage,
+                          onPreviousPage: provider.goToPreviousPage,
+                          onNextPage: provider.goToNextPage,
+                          paginationText: provider.getPaginationText(),
                           isDark: isDark,
-                          onTap: () {
-                            context.pushNamed(
-                              AppRoutes.warehouseDetail,
-                              extra: {'warehouseId': warehouse.id},
-                            );
-                          },
-                        );
-                      },
-                    ),
-                  );
-                }
-
-                final groups = _buildGroups(provider, groupBy);
-                final keys = groups.keys.toList()..sort();
-
-                return RefreshIndicator(
-                  onRefresh: _refreshWarehouses,
-                  child: ListView.builder(
-                    controller: _scrollController,
-                    padding: const EdgeInsets.all(16),
-                    itemCount: keys.length,
-                    itemBuilder: (context, index) {
-                      final key = keys[index];
-                      final items = groups[key]!;
-                      return WarehouseGroupTile(
-                        groupKey: key,
-                        count: items.length,
-                        items: items,
-                        isDark: isDark,
-                        theme: theme,
-                      );
-                    },
+                          theme: theme,
+                        ),
+                    ],
                   ),
                 );
               },
             ),
-          ),
-        ],
+          ],
+        ),
+
+        body: Consumer<WarehouseProvider>(
+          builder: (_, provider, __) {
+            if (provider.isLoading && provider.warehouses.isEmpty) {
+              return ListShimmer.buildListShimmer(
+                context,
+                itemCount: 8,
+                type: ShimmerType.standard,
+              );
+            }
+
+            if (provider.error != null && provider.warehouses.isEmpty) {
+              final info = ErrorManager.analyzeError(provider.error!);
+              final lottiePath = info.type == ErrorType.moduleNotInstalled
+                  ? 'assets/lotties/socialv no data.json'
+                  : 'assets/lotties/Error 404.json';
+
+              return ListView(
+                children: [
+                  const SizedBox(height: 48),
+                  EmptyState(
+                    title: info.title,
+                    subtitle: info.message,
+                    lottieAsset: lottiePath,
+                    actionLabel: 'Retry',
+                    onAction: _refreshWarehouses,
+                  ),
+                ],
+              );
+            }
+
+            if (provider.warehouses.isEmpty) {
+              final hasActiveFilters =
+                  _hasActiveFilter(provider) ||
+                  provider.selectedGroupBy != null;
+
+              return ListView(
+                children: [
+                  const SizedBox(height: 48),
+                  EmptyState(
+                    title: 'No warehouses found',
+                    subtitle: hasActiveFilters
+                        ? 'Try adjusting your filters'
+                        : 'Warehouses will appear here',
+                    lottieAsset: 'assets/lotties/empty ghost.json',
+                    actionLabel: hasActiveFilters
+                        ? 'Clear All Filters'
+                        : 'Refresh',
+                    onAction: hasActiveFilters
+                        ? _clearAllFilters
+                        : _refreshWarehouses,
+                  ),
+                ],
+              );
+            }
+
+            final groupBy = provider.selectedGroupBy;
+
+            if (groupBy == null) {
+              return RefreshIndicator(
+                onRefresh: _refreshWarehouses,
+                child: ListView.builder(
+                  padding: const EdgeInsets.all(16),
+                  itemCount: provider.warehouses.length,
+                  itemBuilder: (context, index) {
+                    final warehouse = provider.warehouses[index];
+                    return WarehouseListTile(
+                      key: ValueKey(warehouse.id),
+                      warehouse: warehouse,
+                      isDark: isDark,
+                    );
+                  },
+                ),
+              );
+            }
+
+            final groups = _buildGroups(provider, groupBy);
+            final keys = groups.keys.toList()..sort();
+
+            return RefreshIndicator(
+              onRefresh: _refreshWarehouses,
+              child: ListView.builder(
+                padding: const EdgeInsets.all(16),
+                itemCount: keys.length,
+                itemBuilder: (context, index) {
+                  final key = keys[index];
+                  final items = groups[key]!;
+                  return WarehouseGroupTile(
+                    groupKey: key,
+                    count: items.length,
+                    items: items,
+                    isDark: isDark,
+                    theme: theme,
+                  );
+                },
+              ),
+            );
+          },
+        ),
       ),
     );
   }

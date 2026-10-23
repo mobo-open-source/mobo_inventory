@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mobo_inv_app/core/services/runtime_permission_service.dart';
+import 'package:mobo_inv_app/shared/widgets/dialogs/common_dialog.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -145,7 +146,7 @@ void main() {
     await tester.pump();
 
     // Dialog appears
-    expect(find.byType(AlertDialog), findsOneWidget);
+    expect(find.byType(CommonDialog), findsOneWidget);
     await tester.tap(find.text('Not Now'));
     await tester.pumpAndSettle();
 
@@ -179,7 +180,7 @@ void main() {
     await tester.tap(find.text('go'));
     await tester.pump();
 
-    expect(find.byType(AlertDialog), findsOneWidget);
+    expect(find.byType(CommonDialog), findsOneWidget);
     await tester.tap(find.text('Open Settings'));
     await tester.pumpAndSettle();
 

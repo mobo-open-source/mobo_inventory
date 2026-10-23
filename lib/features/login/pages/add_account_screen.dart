@@ -8,6 +8,7 @@ import '../../../shared/widgets/loaders/loading_widget.dart';
 import '../../../core/services/odoo_session_manager.dart';
 import '../../../core/services/session_service.dart';
 import '../../../shared/widgets/snackbars/custom_snackbar.dart';
+import '../../../core/exceptions/odoo_error_mapper.dart';
 import 'login_layout.dart'
     show LoginLayout, LoginTextField, LoginButton, LoginErrorDisplay;
 
@@ -120,7 +121,8 @@ class _AddAccountScreenState extends State<AddAccountScreen> {
       });
     } catch (e) {
       setState(() {
-        _errorMessage = 'Failed to add account: ${e.toString()}';
+        _errorMessage =
+            'Failed to add account: ${OdooErrorMapper.toUserMessage(e)}';
         _isLoading = false;
       });
     }
@@ -252,14 +254,14 @@ class _AddAccountScreenState extends State<AddAccountScreen> {
                   Text(
                     'Adding Account',
                     style: GoogleFonts.manrope(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
                     ),
                   ),
                   const SizedBox(width: 12),
                   const LoadingWidget(
                     color: Colors.white,
-                    size: 28,
+                    size: 24,
                     variant: LoadingVariant.staggeredDots,
                   ),
                 ],

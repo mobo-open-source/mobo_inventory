@@ -34,7 +34,7 @@ class OdooAvatar extends StatelessWidget {
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final effectivePlaceholderColor =
-        placeholderColor ?? (isDark ? Colors.grey[700] : Colors.grey[100]);
+        placeholderColor ?? (isDark ? Colors.grey[700] : Colors.grey[300]);
     final effectiveIconColor =
         iconColor ?? (isDark ? Colors.grey[400] : Colors.grey[600]);
 

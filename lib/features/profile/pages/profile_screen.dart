@@ -6,6 +6,7 @@ import 'package:hugeicons/hugeicons.dart';
 import 'package:shimmer/shimmer.dart';
 import 'package:provider/provider.dart';
 import '../../../core/routing/app_routes.dart';
+import '../../../core/theme/app_theme.dart';
 import '../../../core/providers/logout_view_model.dart';
 import '../../../shared/widgets/snackbars/custom_snackbar.dart';
 import '../providers/profile_provider.dart';
@@ -79,15 +80,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
-      backgroundColor: isDark ? Colors.grey[900] : Colors.white,
+      backgroundColor: isDark ? AppTheme.darkSurface : Colors.grey[50],
       builder: (context) => Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const SizedBox(height: 8),
+          const SizedBox(height: 12),
           Container(
             width: 40,
             height: 4,
-            margin: const EdgeInsets.only(bottom: 12),
+            margin: const EdgeInsets.only(bottom: 8),
             decoration: BoxDecoration(
               color: isDark ? Colors.grey[700] : Colors.grey[300],
               borderRadius: BorderRadius.circular(2),
@@ -185,12 +186,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
           if (provider.userData == null) {
             return ConnectionStatusWidget(
               serverUnreachable: true,
-              onRetry: () => provider.fetchUserProfile(forceRefresh: true),
+              onRetry: () => provider.fetchUserProfile(),
             );
           }
 
           return RefreshIndicator(
-            onRefresh: () => provider.fetchUserProfile(forceRefresh: true),
+            onRefresh: () => provider.fetchUserProfile(),
             child: SingleChildScrollView(
               physics: const AlwaysScrollableScrollPhysics(),
               child: Column(
@@ -227,34 +228,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   Widget _buildQuickActionsSection(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final cardColor = isDark ? Colors.grey[900] : Colors.white;
 
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 20),
-      decoration: BoxDecoration(
-        color: cardColor,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: isDark
-              ? Colors.white.withOpacity(0.08)
-              : Colors.black.withOpacity(0.06),
-        ),
-        boxShadow: [
-          if (!isDark)
-            BoxShadow(
-              blurRadius: 16,
-              spreadRadius: 2,
-              offset: const Offset(0, 6),
-              color: Colors.black.withOpacity(0.06),
-            ),
-        ],
-      ),
+      decoration: AppTheme.cardDecoration(isDark),
       child: Column(
         children: [
           ActionTile(
             title: 'Settings',
             subtitle: 'App preferences and sync options',
-            icon: Icons.settings_outlined,
+            icon: HugeIcons.strokeRoundedSettings01,
             onTap: () async {
               try {
                 await context.pushNamed(AppRoutes.settings);
@@ -278,8 +261,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 builder: (ctx) => ActionTile(
                   title: 'Logout',
                   subtitle: 'Sign out from this device',
-                  icon: Icons.logout_outlined,
-                  destructive: true,
+                  icon: HugeIcons.strokeRoundedLogout01,
                   trailing: const SizedBox.shrink(),
                   onTap: () => ctx.read<LogoutViewModel>().confirmLogout(ctx),
                 ),
@@ -311,14 +293,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               decoration: BoxDecoration(
                 color: cardColor,
                 borderRadius: BorderRadius.circular(12),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.05),
-                    blurRadius: 16,
-                    spreadRadius: 2,
-                    offset: const Offset(0, 6),
-                  ),
-                ],
+                boxShadow: AppShadows.card,
               ),
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.center,

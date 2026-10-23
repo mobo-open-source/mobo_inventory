@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:go_router/go_router.dart';
+import '../../../core/theme/app_theme.dart';
 
 /// A highly customizable dialog component used throughout the app for alerts, confirmations, and simple inputs.
 class CommonDialog extends StatelessWidget {
@@ -45,11 +47,22 @@ class CommonDialog extends StatelessWidget {
     final primaryBg = primary;
     final primaryFg = Colors.white;
 
+    // Destructive actions (discard, cancel) use an orange "caution" icon
+    // rather than red — red is reserved for the primary button itself.
+    final iconColor = destructivePrimary ? StatusColors.orange : primary;
+
+    // A plain confirm (no custom body or input) is a compact action dialog.
+    final isCompact = body == null && !showInput;
+
     return Dialog(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-      backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(isCompact ? 16 : 20),
+      ),
+      elevation: 0,
+      shadowColor: Colors.transparent,
+      backgroundColor: isDark ? AppTheme.darkSurface : Colors.white,
       child: Padding(
-        padding: const EdgeInsets.all(20),
+        padding: const EdgeInsets.all(24),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -58,31 +71,31 @@ class CommonDialog extends StatelessWidget {
               if (icon != null) ...[
                 Center(
                   child: Container(
-                    padding: const EdgeInsets.all(12),
+                    padding: const EdgeInsets.all(14),
                     decoration: BoxDecoration(
-                      color: primary.withOpacity(0.08),
-                      borderRadius: BorderRadius.circular(30),
+                      color: iconColor.withValues(alpha: 0.1),
+                      shape: BoxShape.circle,
                     ),
                     child: Icon(
                       icon,
                       size: 26,
-                      color: destructivePrimary ? Colors.red : primary,
+                      color: iconColor,
                     ),
                   ),
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: 16),
               ],
               Text(
                 title,
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   fontSize: 18,
-                  fontWeight: FontWeight.w700,
+                  fontWeight: FontWeight.bold,
                   color: isDark ? Colors.white : Colors.black87,
                 ),
               ),
               if (message != null && message!.trim().isNotEmpty) ...[
-                const SizedBox(height: 8),
+                const SizedBox(height: 10),
                 Text(
                   message!,
                   textAlign: TextAlign.center,
@@ -99,30 +112,26 @@ class CommonDialog extends StatelessWidget {
                 children: [
                   if (icon != null) ...[
                     Container(
-                      padding: const EdgeInsets.all(10),
+                      width: 46,
+                      height: 46,
                       decoration: BoxDecoration(
-                        color: (destructivePrimary ? Colors.red : primary)
-                            .withOpacity(0.1),
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(
-                          color: (destructivePrimary ? Colors.red : primary)
-                              .withOpacity(0.2),
-                        ),
+                        color: iconColor.withValues(alpha: 0.1),
+                        shape: BoxShape.circle,
                       ),
                       child: Icon(
                         icon,
-                        size: 20,
-                        color: destructivePrimary ? Colors.red : primary,
+                        size: 22,
+                        color: iconColor,
                       ),
                     ),
-                    const SizedBox(width: 12),
+                    const SizedBox(width: 14),
                   ],
                   Expanded(
                     child: Text(
                       title,
                       style: TextStyle(
                         fontSize: 18,
-                        fontWeight: FontWeight.w700,
+                        fontWeight: FontWeight.bold,
                         color: isDark ? Colors.white : Colors.black87,
                       ),
                     ),
@@ -130,7 +139,7 @@ class CommonDialog extends StatelessWidget {
                 ],
               ),
               if (message != null && message!.trim().isNotEmpty) ...[
-                const SizedBox(height: 8),
+                const SizedBox(height: 10),
                 Text(
                   message!,
                   style: TextStyle(
@@ -141,25 +150,36 @@ class CommonDialog extends StatelessWidget {
                 ),
               ],
             ],
-            if (body != null) ...[const SizedBox(height: 12), body!],
+            if (body != null) ...[const SizedBox(height: 14), body!],
             if (showInput) ...[
-              const SizedBox(height: 14),
+              const SizedBox(height: 16),
               TextField(
                 controller: controller,
                 autofocus: true,
+                style: TextStyle(
+                  fontWeight: FontWeight.w600,
+                  color: isDark ? Colors.white : Colors.black87,
+                ),
                 decoration: InputDecoration(
                   hintText: inputHint ?? 'Placeholder',
+                  hintStyle: TextStyle(
+                    fontWeight: FontWeight.w400,
+                    fontStyle: FontStyle.italic,
+                    color: isDark ? Colors.grey[400] : Colors.grey[600],
+                  ),
                   filled: true,
-                  fillColor: isDark ? Colors.grey[850] : Colors.grey[50],
+                  fillColor: isDark ? Colors.grey[850] : AppTheme.inputFill,
                   contentPadding: const EdgeInsets.symmetric(
                     horizontal: 14,
                     vertical: 12,
                   ),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide(
-                      color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
-                    ),
+                    borderSide: BorderSide.none,
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide.none,
                   ),
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
@@ -168,7 +188,7 @@ class CommonDialog extends StatelessWidget {
                 ),
               ),
             ],
-            const SizedBox(height: 16),
+            const SizedBox(height: 20),
             Row(
               children: [
                 if (secondaryLabel != null && onSecondary != null) ...[
@@ -176,15 +196,19 @@ class CommonDialog extends StatelessWidget {
                     child: OutlinedButton(
                       onPressed: onSecondary,
                       style: OutlinedButton.styleFrom(
+                        minimumSize: const Size.fromHeight(48),
                         padding: const EdgeInsets.symmetric(vertical: 12),
-                        side: BorderSide(color: primary),
+                        side: BorderSide(color: primary, width: 1.5),
                         backgroundColor: isDark
-                            ? const Color(0xFF1E1E1E)
+                            ? AppTheme.darkSurface
                             : Colors.white,
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(12),
                         ),
-                        textStyle: const TextStyle(fontWeight: FontWeight.w600),
+                        textStyle: GoogleFonts.manrope(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
                       child: Text(
                         secondaryLabel!,
@@ -198,6 +222,7 @@ class CommonDialog extends StatelessWidget {
                   child: ElevatedButton(
                     onPressed: onPrimary,
                     style: ElevatedButton.styleFrom(
+                      minimumSize: const Size.fromHeight(48),
                       backgroundColor: primaryBg,
                       foregroundColor: primaryFg,
                       elevation: 0,
@@ -205,7 +230,12 @@ class CommonDialog extends StatelessWidget {
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(12),
                       ),
-                      textStyle: const TextStyle(fontWeight: FontWeight.w700),
+                      // A button's textStyle replaces the theme's rather than
+                      // merging with it, so it must name the font itself.
+                      textStyle: GoogleFonts.manrope(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                     child: Text(primaryLabel),
                   ),
@@ -226,6 +256,7 @@ class CommonDialog extends StatelessWidget {
     String cancelText = 'Cancel',
     bool destructive = false,
     IconData? icon,
+    bool topIconCentered = false,
   }) {
     return showDialog<bool>(
       context: context,
@@ -233,6 +264,7 @@ class CommonDialog extends StatelessWidget {
         title: title,
         message: message,
         icon: icon,
+        topIconCentered: topIconCentered,
         primaryLabel: confirmText,
         onPrimary: () => ctx.pop(true),
         secondaryLabel: cancelText,

@@ -6,6 +6,7 @@ import '../../../core/services/haptics_service.dart';
 import '../../../core/services/session_service.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/routing/app_routes.dart';
+import '../../../core/theme/app_theme.dart';
 
 /// Error screen displayed when the inventory module is not found on the Odoo server.
 class MissingInventoryScreen extends StatelessWidget {
@@ -19,7 +20,6 @@ class MissingInventoryScreen extends StatelessWidget {
     final isDark = theme.brightness == Brightness.dark;
 
     return Scaffold(
-      backgroundColor: isDark ? Colors.grey[900] : Colors.white,
       body: SafeArea(
         child: LayoutBuilder(
           builder: (context, constraints) {
@@ -121,12 +121,8 @@ class MissingInventoryScreen extends StatelessWidget {
                             label: const Text('Logout'),
                             style: ElevatedButton.styleFrom(
                               minimumSize: const Size(140, 44),
-                              backgroundColor: isDark
-                                  ? Colors.red[700]
-                                  : theme.colorScheme.error,
-                              foregroundColor: isDark
-                                  ? Colors.white
-                                  : theme.colorScheme.onError,
+                              backgroundColor: StatusColors.red,
+                              foregroundColor: Colors.white,
                             ),
                           ),
                         ],

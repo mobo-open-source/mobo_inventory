@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:hugeicons/hugeicons.dart';
 
-/// A badge widget that displays the number of active filters currently applied.
+import '../../../core/theme/app_theme.dart';
+
+/// "N Active" pill on the filter bar above a list/kanban view: solid black
+/// with white text, matching the group-by pill that often sits beside it.
 class ActiveFiltersBadge extends StatelessWidget {
   final int count;
   final ThemeData theme;
@@ -30,7 +32,7 @@ class ActiveFiltersBadge extends StatelessWidget {
             fontSize: 12,
             color: isDark
                 ? Colors.white70
-                : theme.colorScheme.onSurface.withOpacity(0.7),
+                : theme.colorScheme.onSurface.withValues(alpha: 0.7),
             fontWeight: FontWeight.w500,
           ),
         ),
@@ -38,28 +40,28 @@ class ActiveFiltersBadge extends StatelessWidget {
     }
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
-        color: isDark ? Colors.white70 : Colors.black,
-        borderRadius: BorderRadius.circular(12),
+        color: Colors.black,
+        borderRadius: BorderRadius.circular(AppRadius.pill),
+        // Keeps the black pill visible against the dark scaffold.
+        border: isDark ? Border.all(color: Colors.grey[700]!) : null,
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Icon(
-            HugeIcons.strokeRoundedFilterHorizontal,
-            size: 14,
-            color: Colors.white,
-          ),
-          const SizedBox(width: 4),
           Text(
-            '$count active',
-            style: TextStyle(
+            '$count',
+            style: const TextStyle(
               fontSize: 12,
-
-              color: isDark ? Colors.black : Colors.white,
-              fontWeight: FontWeight.w500,
+              fontWeight: FontWeight.bold,
+              color: Colors.white,
             ),
+          ),
+          const SizedBox(width: 5),
+          const Text(
+            'Active',
+            style: TextStyle(fontSize: 12, color: Colors.white),
           ),
         ],
       ),

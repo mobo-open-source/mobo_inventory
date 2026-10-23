@@ -22,7 +22,7 @@ class SwitchTile extends StatelessWidget {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return ListTile(
-      leading: Icon(icon, color: isDark ? Colors.grey[400] : Colors.grey[600]),
+      leading: Icon(icon, color: isDark ? Colors.white : Colors.black),
       title: Text(
         title,
         style: TextStyle(

@@ -86,6 +86,61 @@ void main() {
       expect(provider.database, 'db1');
     });
 
+    group('when the server hides its database list', () {
+      LoginProvider build({required String? detected}) => LoginProvider(
+        clientFactory: (_) => mockOdooClient,
+        databaseService: mockDatabaseService,
+        findDefaultDatabase: (_) async => detected,
+      )..urlController.text = 'test.com';
+
+      test('uses the detected default database', () async {
+        when(
+          () => mockDatabaseService.fetchDatabaseList(any()),
+        ).thenThrow(const DatabaseListAccessDenied());
+        final provider = build(detected: 'prod');
+
+        await provider.fetchDatabaseList();
+
+        expect(provider.dropdownItems, ['prod']);
+        expect(provider.database, 'prod');
+        expect(provider.urlCheck, isTrue);
+        expect(provider.manualDbEntryRequired, isFalse);
+        expect(provider.dbInfoMessage, 'Detected default database: prod');
+      });
+
+      test('asks for the name when none can be detected', () async {
+        when(
+          () => mockDatabaseService.fetchDatabaseList(any()),
+        ).thenThrow(const DatabaseListAccessDenied());
+        final provider = build(detected: null);
+
+        await provider.fetchDatabaseList();
+
+        expect(provider.manualDbEntryRequired, isTrue);
+        expect(provider.urlCheck, isTrue);
+        expect(provider.errorMessage, isNull);
+        expect(
+          provider.dbInfoMessage,
+          'Could not discover default database. Please enter it manually.',
+        );
+      });
+
+      test('an empty list with nothing detected explains why', () async {
+        when(
+          () => mockDatabaseService.fetchDatabaseList(any()),
+        ).thenAnswer((_) async => []);
+        final provider = build(detected: null);
+
+        await provider.fetchDatabaseList();
+
+        expect(provider.urlCheck, isFalse);
+        expect(
+          provider.errorMessage,
+          'This server does not expose the database list and no default database could be detected.',
+        );
+      });
+    });
+
     test('login success', () async {
       final mockSession = MockOdooSession();
       when(() => mockSession.id).thenReturn('session_id');

@@ -1,3 +1,5 @@
+import '../../../core/utils/odoo_value.dart';
+
 class Warehouse {
   final int id;
   final String name;
@@ -39,7 +41,7 @@ class Warehouse {
     return Warehouse(
       id: json['id'] as int,
       name: (json['name'] ?? '').toString(),
-      code: (json['code'] ?? '').toString(),
+      code: odooString(json['code']),
       companyName: company,
       lotStockId: lotStockId,
       lotStockName: lotStockName,

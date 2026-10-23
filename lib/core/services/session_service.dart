@@ -1,11 +1,14 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
+import 'package:odoo_rpc/odoo_rpc.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/appsession.dart';
 import 'odoo_session_manager.dart';
+import 'odoo_metadata_service.dart';
 import 'secure_storage_service.dart';
 import 'connectivity_service.dart';
+import '../utils/base64_utils.dart';
 
 /// High-level service for handling application sessions and stored accounts.
 /// Extends [ChangeNotifier] to provide reactive session state to the UI.
@@ -89,6 +92,80 @@ class SessionService extends ChangeNotifier {
   void updateSession(AppSessionData newSession) {
     _currentSession = newSession;
     notifyListeners();
+    unawaited(_syncStoredAccount(newSession));
+  }
+
+  /// Keeps the saved entry for [session]'s account in step with the session
+  /// that just became current: its live `sessionId`, the `isCurrent` flag and
+  /// `lastLogin`.
+  ///
+  /// Runs on every committed session change — login, switch, a silent
+  /// re-auth — and on nothing provisional, since the session manager holds
+  /// those callbacks back. Without it the saved `sessionId` goes stale after
+  /// the first switch, so every later switch fell back to a password login
+  /// (a new server session each time) and a 2FA account asked for a code on
+  /// every switch. Accounts not saved yet are left to [storeAccount], which
+  /// also fetches their name and avatar.
+  Future<void> _syncStoredAccount(AppSessionData session) async {
+    final index = _storedAccountIndex(session);
+    if (index == -1) return;
+
+    final existing = _storedAccounts[index];
+    final alreadyInStep =
+        existing['sessionId'] == session.sessionId &&
+        existing['isCurrent'] == true;
+    if (alreadyInStep) return;
+
+    for (final account in _storedAccounts) {
+      account['isCurrent'] = false;
+    }
+    _storedAccounts[index] = {
+      ...existing,
+      'sessionId': session.sessionId,
+      'isCurrent': true,
+      'lastLogin': DateTime.now().toIso8601String(),
+    };
+    await _saveStoredAccountsWithRetry();
+    notifyListeners();
+  }
+
+  int _storedAccountIndex(AppSessionData session) => _storedAccounts.indexWhere(
+    (account) =>
+        account['userId']?.toString() == session.userId.toString() &&
+        (account['serverUrl'] ?? account['url']) == session.serverUrl &&
+        account['database'] == session.database,
+  );
+
+  /// Refreshes the saved name and avatar of [session]'s account.
+  ///
+  /// The account switcher shows what [storeAccount] saved at sign-in, so a
+  /// rename — in the profile screen or in Odoo itself — stayed invisible there
+  /// until that account signed in again. Takes the session the data was read
+  /// for rather than the current one, so a switch while a profile read is in
+  /// flight cannot put one account's name on another. Writes only when
+  /// something changed: the avatar is a full base64 image.
+  Future<void> updateStoredAccountProfile(
+    AppSessionData session, {
+    String? name,
+    String? imageBase64,
+  }) async {
+    final index = _storedAccountIndex(session);
+    if (index == -1) return;
+
+    final existing = _storedAccounts[index];
+    final updated = Map<String, dynamic>.from(existing);
+    if (name != null && name.isNotEmpty && name != 'false') {
+      updated['name'] = name;
+      updated['userName'] = name;
+    }
+    if (imageBase64 != null) {
+      updated['imageBase64'] = imageBase64.isNotEmpty ? imageBase64 : null;
+    }
+    if (mapEquals(updated, existing)) return;
+
+    _storedAccounts[index] = updated;
+    await _saveStoredAccountsWithRetry();
+    notifyListeners();
   }
 
   void clearSession() {
@@ -105,6 +182,13 @@ class SessionService extends ChangeNotifier {
       try {
         await OdooSessionManager.logout();
       } catch (e) {}
+
+      // A one-off failure while probing model existence earlier in this
+      // session (e.g. mid session-expiry) permanently caches "module not
+      // installed" for that model — clear it so the next login re-probes
+      // from scratch instead of carrying that stale, possibly-wrong verdict
+      // into the new session.
+      OdooMetadataService.reset();
 
       try {
         await _clearStoredAccountsData();
@@ -230,12 +314,24 @@ class SessionService extends ChangeNotifier {
   }) async {
     try {
       String? imageBase64;
-      String userDisplayName = session.userLogin;
+      // The name the server already reported for this session, when it has
+      // one; the login stands in until the read below answers.
+      String userDisplayName =
+          (session.userName.isNotEmpty && session.userName != 'false')
+          ? session.userName
+          : session.userLogin;
 
       try {
-        final client = await OdooSessionManager.getClient();
+        // A client scoped to THIS session rather than the globally active
+        // one: during Add Account the global client can still belong to the
+        // previous account, which saved the new account under the old one's
+        // name and avatar.
+        final client = OdooClient(
+          session.serverUrl,
+          sessionId: session.odooSession,
+        );
 
-        if (client != null && session.userId != null) {
+        try {
           final userDetails = await client.callKw({
             'model': 'res.users',
             'method': 'read',
@@ -252,11 +348,13 @@ class SessionService extends ChangeNotifier {
             if (n != null && n != false) {
               userDisplayName = n.toString();
             }
-            final img = user['image_1920'];
-            if (img != null && img != false) {
-              imageBase64 = img.toString();
+            final img = odooBinaryToBase64(user['image_1920']);
+            if (img.isNotEmpty) {
+              imageBase64 = img;
             }
           }
+        } finally {
+          client.close();
         }
       } catch (e) {}
 

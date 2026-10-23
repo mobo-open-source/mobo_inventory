@@ -1,7 +1,7 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
-import 'package:flutter/foundation.dart';
 
+/// Service for handling Odoo password reset flows.
 class ResetPasswordService {
   static Future<Map<String, dynamic>> sendResetPasswordEmail({
     required String serverUrl,
@@ -23,8 +23,11 @@ class ResetPasswordService {
         login,
       );
 
+      // A result Odoo itself rendered is final: falling through would submit
+      // the request a second time and replace the server's own reason (e.g.
+      // "No account found for this login") with a guess.
       if (webFlowResult['success'] == true ||
-          webFlowResult['requiresWebView'] == true) {
+          webFlowResult['fromServer'] == true) {
         return webFlowResult;
       }
 
@@ -43,18 +46,16 @@ class ResetPasswordService {
 
       for (final endpoint in possibleEndpoints) {
         try {
-          final response = await http
-              .get(
-                Uri.parse('$cleanUrl$endpoint?db=$database'),
-                headers: {
-                  'User-Agent':
-                      'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Mobile Safari/537.36',
-                  'Accept':
-                      'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-                  'Accept-Language': 'en-US,en;q=0.5',
-                },
-              )
-              .timeout(Duration(seconds: 10));
+          final response = await http.get(
+            Uri.parse('$cleanUrl$endpoint?db=$database'),
+            headers: {
+              'User-Agent':
+              'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Mobile Safari/537.36',
+              'Accept':
+              'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+              'Accept-Language': 'en-US,en;q=0.5',
+            },
+          ).timeout(Duration(seconds: 10));
 
           if (response.statusCode == 200) {
             final body = response.body.toLowerCase();
@@ -97,13 +98,10 @@ class ResetPasswordService {
       }
 
       if (requiresRecaptcha) {
-        final webViewUrl = '$cleanUrl$workingEndpoint?db=$database';
         return {
           'success': false,
-          'requiresWebView': true,
-          'webViewUrl': webViewUrl,
           'message':
-              'This server requires additional security verification. Please complete the reset in the secure browser.',
+          'Unable to reset automatically due to server security (reCAPTCHA). Please try again later or contact your administrator.',
         };
       }
 
@@ -116,9 +114,9 @@ class ResetPasswordService {
       final headers = {
         'Content-Type': 'application/x-www-form-urlencoded',
         'User-Agent':
-            'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Mobile Safari/537.36',
+        'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Mobile Safari/537.36',
         'Accept':
-            'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
         'Accept-Language': 'en-US,en;q=0.5',
         'Accept-Encoding': 'gzip, deflate',
         'Origin': cleanUrl,
@@ -132,10 +130,10 @@ class ResetPasswordService {
 
       var response = await http
           .post(
-            Uri.parse('$cleanUrl$workingEndpoint'),
-            headers: headers,
-            body: Uri(queryParameters: formData).query,
-          )
+        Uri.parse('$cleanUrl$workingEndpoint'),
+        headers: headers,
+        body: Uri(queryParameters: formData).query,
+      )
           .timeout(const Duration(seconds: 30));
 
       if (response.statusCode == 400) {
@@ -147,10 +145,10 @@ class ResetPasswordService {
 
         response = await http
             .post(
-              Uri.parse('$cleanUrl$workingEndpoint'),
-              headers: headers,
-              body: Uri(queryParameters: simpleFormData).query,
-            )
+          Uri.parse('$cleanUrl$workingEndpoint'),
+          headers: headers,
+          body: Uri(queryParameters: simpleFormData).query,
+        )
             .timeout(const Duration(seconds: 30));
 
         if (response.statusCode == 400 && database.isNotEmpty) {
@@ -160,10 +158,10 @@ class ResetPasswordService {
 
           response = await http
               .post(
-                Uri.parse(urlWithDb),
-                headers: {...headers, 'Referer': urlWithDb},
-                body: Uri(queryParameters: formDataWithoutDb).query,
-              )
+            Uri.parse(urlWithDb),
+            headers: {...headers, 'Referer': urlWithDb},
+            body: Uri(queryParameters: formDataWithoutDb).query,
+          )
               .timeout(const Duration(seconds: 30));
 
           if (response.statusCode == 400) {
@@ -171,10 +169,10 @@ class ResetPasswordService {
 
             response = await http
                 .post(
-                  Uri.parse(urlWithDb),
-                  headers: {...headers, 'Referer': urlWithDb},
-                  body: Uri(queryParameters: minimalData).query,
-                )
+              Uri.parse(urlWithDb),
+              headers: {...headers, 'Referer': urlWithDb},
+              body: Uri(queryParameters: minimalData).query,
+            )
                 .timeout(const Duration(seconds: 30));
           }
         }
@@ -185,29 +183,29 @@ class ResetPasswordService {
 
         if (location != null) {
           try {
-            final redirectUrl = location.startsWith('http')
-                ? location
-                : '$cleanUrl$location';
-            final redirectResponse = await http
-                .get(
-                  Uri.parse(redirectUrl),
-                  headers: {
-                    'User-Agent': headers['User-Agent']!,
-                    'Accept': headers['Accept']!,
-                    if (cookies != null)
-                      'Cookie': cookies.entries
-                          .map((e) => '${e.key}=${e.value}')
-                          .join('; '),
-                  },
-                )
-                .timeout(const Duration(seconds: 30));
+            final redirectUrl =
+            location.startsWith('http') ? location : '$cleanUrl$location';
+            final redirectResponse = await http.get(
+              Uri.parse(redirectUrl),
+              headers: {
+                'User-Agent': headers['User-Agent']!,
+                'Accept': headers['Accept']!,
+                if (cookies != null)
+                  'Cookie': cookies.entries
+                      .map((e) => '${e.key}=${e.value}')
+                      .join('; '),
+              },
+            ).timeout(const Duration(seconds: 30));
+
+            final alertResult = _resultFromOdooAlert(redirectResponse.body);
+            if (alertResult != null) return alertResult;
 
             final responseBody = redirectResponse.body.toLowerCase();
             if (_containsSuccessIndicators(responseBody)) {
               return {
                 'success': true,
                 'message':
-                    'Password reset email sent successfully. Please check your email for reset instructions.',
+                'Password reset email sent successfully. Please check your email for reset instructions.',
               };
             } else if (_containsErrorIndicators(responseBody)) {
               return {
@@ -215,24 +213,30 @@ class ResetPasswordService {
                 'message': 'User not found or invalid email address.',
               };
             }
-          } catch (e) {}
+          } catch (_) {
+            // Following the redirect is best-effort; on failure fall through
+            // to the generic result below.
+          }
         }
 
         return {
           'success': true,
           'message':
-              'Password reset email sent successfully. Please check your email for reset instructions.',
+          'Password reset email sent successfully. Please check your email for reset instructions.',
         };
       }
 
       if (response.statusCode == 200) {
+        final alertResult = _resultFromOdooAlert(response.body);
+        if (alertResult != null) return alertResult;
+
         final responseBody = response.body.toLowerCase();
 
         if (_containsSuccessIndicators(responseBody)) {
           return {
             'success': true,
             'message':
-                'Password reset email sent successfully. Please check your email for reset instructions.',
+            'Password reset email sent successfully. Please check your email for reset instructions.',
           };
         } else if (_containsErrorIndicators(responseBody)) {
           return {
@@ -246,14 +250,14 @@ class ResetPasswordService {
             return {
               'success': false,
               'message':
-                  'Unable to send reset email. Please verify the email address is correct.',
+              'Unable to send reset email. Please verify the email address is correct.',
             };
           }
 
           return {
             'success': true,
             'message':
-                'Password reset email sent successfully. Please check your email for reset instructions.',
+            'Password reset email sent successfully. Please check your email for reset instructions.',
           };
         }
       } else if (response.statusCode == 400) {
@@ -275,18 +279,18 @@ class ResetPasswordService {
         return {
           'success': false,
           'message':
-              'Unable to send reset email. Please verify your email address and try again.',
+          'Unable to send reset email. Please verify your email address and try again.',
         };
       } else if (response.statusCode == 404) {
         return {
           'success': false,
-          'message': 'Reset password service not available on this server.',
+          'message': _resetDisabledMessage,
         };
       } else {
         return {
           'success': false,
           'message':
-              'Failed to send reset email. Server returned status: ${response.statusCode}',
+          'Failed to send reset email. Server returned status: ${response.statusCode}',
         };
       }
     } catch (e) {
@@ -294,7 +298,7 @@ class ResetPasswordService {
         return {
           'success': false,
           'message':
-              'Request timeout. Please check your internet connection and try again.',
+          'Request timeout. Please check your internet connection and try again.',
         };
       } else if (e.toString().contains('SocketException')) {
         return {
@@ -308,6 +312,62 @@ class ResetPasswordService {
         };
       }
     }
+  }
+
+  static const String _resetDisabledMessage =
+      'Password reset is not enabled for this database. Please ask your '
+      'administrator to enable "Password Reset" in Odoo Settings, or to '
+      'reset your password for you.';
+
+  static final RegExp _odooAlertPattern = RegExp(
+    r'''<p[^>]*class=["'][^"']*\balert-(danger|success)\b[^"']*["'][^>]*>(.*?)</p>''',
+    caseSensitive: false,
+    dotAll: true,
+  );
+
+  /// Reads the outcome Odoo itself rendered on the reset page.
+  ///
+  /// `auth_signup.reset_password` answers HTTP 200 for both outcomes, and on
+  /// Odoo 17, 18 and 19 renders the result the same way: a
+  /// `<p class="alert alert-success">` with the confirmation, or a
+  /// `<p class="alert alert-danger">` with the reason ("No account found for
+  /// this login", a failed captcha, ...). Keyword matching on the whole page
+  /// cannot tell those apart reliably, so this is checked first, and the
+  /// server's own wording is what the user reads. Null when the page carries
+  /// neither alert.
+  static Map<String, dynamic>? _resultFromOdooAlert(String html) {
+    final match = _odooAlertPattern.firstMatch(html);
+    if (match == null) return null;
+
+    final text = (match.group(2) ?? '')
+        .replaceAll(RegExp(r'<[^>]*>'), ' ')
+        .replaceAll('&nbsp;', ' ')
+        .replaceAll('&quot;', '"')
+        .replaceAll('&#39;', "'")
+        .replaceAll('&lt;', '<')
+        .replaceAll('&gt;', '>')
+        .replaceAll('&amp;', '&')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+
+    if (match.group(1)!.toLowerCase() == 'success') {
+      return {
+        'success': true,
+        'fromServer': true,
+        'message': text.isNotEmpty
+            ? text
+            : 'Password reset email sent successfully. Please check your '
+                  'email for reset instructions.',
+      };
+    }
+    return {
+      'success': false,
+      'fromServer': true,
+      'message': text.isNotEmpty
+          ? text
+          : 'Unable to send reset email. Please verify the email address is '
+                'correct.',
+    };
   }
 
   static bool _containsSuccessIndicators(String responseBody) {
@@ -327,18 +387,19 @@ class ResetPasswordService {
         responseBody.contains('invalid user');
   }
 
+  /// Checks if the given string is a syntactically valid email address.
   static bool isValidEmail(String email) {
     return RegExp(
       r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$',
     ).hasMatch(email);
   }
 
+  /// Validates that the given string is a properly formatted URL.
   static bool isValidUrl(String url) {
     if (url.trim().isEmpty) return false;
     try {
       final input = url.trim();
-      final withScheme =
-          input.startsWith('http://') || input.startsWith('https://')
+      final withScheme = input.startsWith('http://') || input.startsWith('https://')
           ? input
           : 'https://$input';
 
@@ -353,9 +414,7 @@ class ResetPasswordService {
       }
 
       final host = uri.host;
-      final hostPattern = RegExp(
-        r'^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$',
-      );
+      final hostPattern = RegExp(r'^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$');
       if (!hostPattern.hasMatch(host)) {
         return false;
       }
@@ -367,10 +426,10 @@ class ResetPasswordService {
   }
 
   static Map<String, String> _extractAllFormData(
-    String html,
-    String login,
-    String database,
-  ) {
+      String html,
+      String login,
+      String database,
+      ) {
     final Map<String, String> formData = {};
 
     formData['login'] = login;
@@ -467,58 +526,6 @@ class ResetPasswordService {
     return null;
   }
 
-  static String? _extractTokenValue(String html) {
-    final patterns = [
-      RegExp(
-        r'<input[^>]*name=["\x27]token["\x27][^>]*value=["\x27]([^"\x27]*)["\x27]',
-        caseSensitive: false,
-      ),
-      RegExp(
-        r'<input[^>]*value=["\x27]([^"\x27]*)["\x27][^>]*name=["\x27]token["\x27]',
-        caseSensitive: false,
-      ),
-
-      RegExp(
-        r'<input[^>]*type=["\x27]hidden["\x27][^>]*name=["\x27]token["\x27][^>]*value=["\x27]([^"\x27]*)["\x27]',
-        caseSensitive: false,
-      ),
-      RegExp(
-        r'<input[^>]*name=["\x27]token["\x27][^>]*type=["\x27]hidden["\x27][^>]*value=["\x27]([^"\x27]*)["\x27]',
-        caseSensitive: false,
-      ),
-
-      RegExp(
-        r'token["\x27]?\s*:\s*["\x27]([^"\x27]+)["\x27]',
-        caseSensitive: false,
-      ),
-      RegExp(
-        r'var\s+token\s*=\s*["\x27]([^"\x27]+)["\x27]',
-        caseSensitive: false,
-      ),
-
-      RegExp(
-        r'name=["\x27]token["\x27][^>]*value=["\x27]([^"\x27]*)["\x27]',
-        caseSensitive: false,
-      ),
-    ];
-
-    for (final pattern in patterns) {
-      final match = pattern.firstMatch(html);
-      if (match != null &&
-          match.group(1) != null &&
-          match.group(1)!.isNotEmpty) {
-        return match.group(1);
-      }
-    }
-
-    if (html.toLowerCase().contains('name="token"') ||
-        html.toLowerCase().contains("name='token'")) {
-      return null;
-    }
-
-    return null;
-  }
-
   static bool _detectRecaptcha(String responseBody) {
     final body = responseBody.toLowerCase();
 
@@ -541,10 +548,10 @@ class ResetPasswordService {
   }
 
   static Future<Map<String, dynamic>> _tryDirectApiReset(
-    String cleanUrl,
-    String database,
-    String login,
-  ) async {
+      String cleanUrl,
+      String database,
+      String login,
+      ) async {
     try {
       final signupUrl = '$cleanUrl/auth_signup/signup';
 
@@ -566,13 +573,13 @@ class ResetPasswordService {
 
       final response = await http
           .post(
-            Uri.parse(signupUrl),
-            headers: {
-              'Content-Type': 'application/json',
-              'Accept': 'application/json',
-            },
-            body: jsonEncode(signupBody),
-          )
+        Uri.parse(signupUrl),
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+        body: jsonEncode(signupBody),
+      )
           .timeout(const Duration(seconds: 30));
 
       if (response.statusCode == 200) {
@@ -582,7 +589,7 @@ class ResetPasswordService {
           return {
             'success': true,
             'message':
-                'Password reset email sent successfully. Please check your email for reset instructions.',
+            'Password reset email sent successfully. Please check your email for reset instructions.',
           };
         }
       }
@@ -594,62 +601,49 @@ class ResetPasswordService {
   }
 
   static Future<Map<String, dynamic>> _tryWebInterfaceReset(
-    String cleanUrl,
-    String database,
-    String login,
-  ) async {
+      String cleanUrl,
+      String database,
+      String login,
+      ) async {
     try {
       final loginUrl = '$cleanUrl/web/login';
       final resetUrl = '$cleanUrl/web/reset_password';
-      Map<String, String> cookies = {};
+      final dbQuery = database.isNotEmpty ? '&db=$database' : '';
 
-      final initialGet = await http
-          .get(
-            Uri.parse('$loginUrl?redirect=/web/login'),
-            headers: {
-              'User-Agent':
-                  'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Mobile Safari/537.36',
-              'Accept':
-                  'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-            },
-          )
-          .timeout(const Duration(seconds: 15));
+      final Map<String, String> cookies = {};
 
-      final initialSetCookie = initialGet.headers['set-cookie'];
-      if (initialSetCookie != null) {
-        cookies.addAll(_parseCookies(initialSetCookie));
+      // Seeds the cookie jar; the response body itself is not needed.
+      await _getFollowingRedirects(
+        '$loginUrl?redirect=/web/login$dbQuery',
+        cookies,
+      );
+
+      final resetGet = await _getFollowingRedirects(
+        '$resetUrl?redirect=/web/login$dbQuery',
+        cookies,
+        referer: '$loginUrl?redirect=/web/login$dbQuery',
+      );
+
+      // Odoo's `/web/reset_password` raises NotFound when the database has
+      // password reset switched off (`auth_signup.reset_password`, Settings >
+      // Permissions > Password Reset) or `auth_signup` is not installed. That
+      // is a server setting, not a transient failure, so it is final: the
+      // other endpoints below would only repeat it, and "try again later"
+      // would send the user round in circles.
+      if (resetGet.statusCode == 404) {
+        return {
+          'success': false,
+          'fromServer': true,
+          'message': _resetDisabledMessage,
+        };
       }
-
-      final resetGet = await http
-          .get(
-            Uri.parse('$resetUrl?redirect=/web/login'),
-            headers: {
-              'User-Agent':
-                  'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Mobile Safari/537.36',
-              'Accept':
-                  'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-              if (cookies.isNotEmpty)
-                'Cookie': cookies.entries
-                    .map((e) => '${e.key}=${e.value}')
-                    .join('; '),
-              'Referer': '$loginUrl?redirect=/web/login',
-            },
-          )
-          .timeout(const Duration(seconds: 15));
 
       if (resetGet.statusCode != 200) {
         return {
           'success': false,
-          'requiresWebView': true,
-          'webViewUrl': '$cleanUrl/web/login?db=$database',
           'message':
-              'Unable to load reset form automatically. Please complete the reset in the secure browser.',
+          'Unable to load reset form automatically (status ${resetGet.statusCode}). Please try again later.',
         };
-      }
-
-      final resetSetCookie = resetGet.headers['set-cookie'];
-      if (resetSetCookie != null) {
-        cookies.addAll(_parseCookies(resetSetCookie));
       }
 
       final csrfToken = _extractCsrfToken(resetGet.body);
@@ -660,41 +654,54 @@ class ResetPasswordService {
 
       formData['login'] = login;
       formData['redirect'] = '/web/login';
-
       final postHeaders = {
         'Content-Type': 'application/x-www-form-urlencoded',
         'User-Agent':
-            'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Mobile Safari/537.36',
+        'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Mobile Safari/537.36',
         'Accept':
-            'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
         'Origin': cleanUrl,
-        'Referer': '$resetUrl?redirect=/web/login',
-        'Cookie': cookies.entries.map((e) => '${e.key}=${e.value}').join('; '),
+        'Referer': '$resetUrl?redirect=/web/login$dbQuery',
+        if (cookies.isNotEmpty)
+          'Cookie':
+          cookies.entries.map((e) => '${e.key}=${e.value}').join('; '),
       };
 
-      final postResponse = await http
-          .post(
-            Uri.parse('$resetUrl?redirect=/web/login'),
-            headers: postHeaders,
-            body: Uri(queryParameters: formData).query,
-          )
-          .timeout(const Duration(seconds: 30));
+      final postRequest =
+      http.Request('POST', Uri.parse('$resetUrl?redirect=/web/login$dbQuery'))
+        ..followRedirects = false
+        ..headers.addAll(postHeaders)
+        ..body = Uri(queryParameters: formData).query;
+
+      final postClient = http.Client();
+      final http.Response postResponse;
+      try {
+        final streamedResponse = await postClient
+            .send(postRequest)
+            .timeout(const Duration(seconds: 30));
+        postResponse = await http.Response.fromStream(streamedResponse);
+      } finally {
+        postClient.close();
+      }
 
       if (postResponse.statusCode == 302 || postResponse.statusCode == 303) {
         return {
           'success': true,
           'message':
-              'Password reset email sent successfully. Please check your email for reset instructions.',
+          'Password reset email sent successfully. Please check your email for reset instructions.',
         };
       }
 
       if (postResponse.statusCode == 200) {
+        final alertResult = _resultFromOdooAlert(postResponse.body);
+        if (alertResult != null) return alertResult;
+
         final body = postResponse.body.toLowerCase();
         if (_containsSuccessIndicators(body)) {
           return {
             'success': true,
             'message':
-                'Password reset email sent successfully. Please check your email for reset instructions.',
+            'Password reset email sent successfully. Please check your email for reset instructions.',
           };
         }
         if (_containsErrorIndicators(body)) {
@@ -707,26 +714,93 @@ class ResetPasswordService {
         return {
           'success': true,
           'message':
-              'Password reset email sent successfully. Please check your email for reset instructions.',
+          'Password reset email sent successfully. Please check your email for reset instructions.',
         };
       }
 
       return {
         'success': false,
-        'requiresWebView': true,
-        'webViewUrl': '$cleanUrl/web/login?db=$database',
         'message':
-            'Unable to reset password automatically. Please complete the reset in the secure browser.',
+        'Unable to reset password automatically. Please try again later or contact your administrator.',
       };
     } catch (e) {
       return {
         'success': false,
-        'requiresWebView': true,
-        'webViewUrl': '$cleanUrl/web/login?db=$database',
         'message':
-            'Unable to reset password automatically. Please complete the reset in the secure browser.',
+        'Unable to reset password automatically. Please try again later or contact your administrator.',
       };
     }
+  }
+
+  static Future<http.Response> _getFollowingRedirects(
+      String url,
+      Map<String, String> cookies, {
+        String? referer,
+        int maxHops = 5,
+      }) async {
+    var currentUrl = url;
+    var currentReferer = referer;
+    final visitedCookieState = <String, String>{};
+
+    for (var hop = 0; hop <= maxHops; hop++) {
+      final cookieHeaderNow = cookies.entries
+          .map((e) => '${e.key}=${e.value}')
+          .join('; ');
+
+      if (visitedCookieState[currentUrl] == cookieHeaderNow) {
+        throw http.ClientException(
+          'Redirect loop detected (same URL and cookies repeated)',
+          Uri.parse(currentUrl),
+        );
+      }
+      visitedCookieState[currentUrl] = cookieHeaderNow;
+
+      final request = http.Request('GET', Uri.parse(currentUrl))
+        ..followRedirects = false
+        ..headers['User-Agent'] =
+            'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Mobile Safari/537.36'
+        ..headers['Accept'] =
+            'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8';
+      if (cookies.isNotEmpty) {
+        request.headers['Cookie'] =
+            cookies.entries.map((e) => '${e.key}=${e.value}').join('; ');
+      }
+      if (currentReferer != null) {
+        request.headers['Referer'] = currentReferer;
+      }
+
+      final client = http.Client();
+      http.Response response;
+      try {
+        final streamedResponse = await client
+            .send(request)
+            .timeout(const Duration(seconds: 15));
+        response = await http.Response.fromStream(streamedResponse);
+      } finally {
+        client.close();
+      }
+
+      final setCookie = response.headers['set-cookie'];
+      if (setCookie != null) {
+        cookies.addAll(_parseCookies(setCookie));
+      }
+
+      if (response.statusCode < 300 || response.statusCode >= 400) {
+        return response;
+      }
+
+      final location = response.headers['location'];
+      if (location == null) {
+        return response;
+      }
+
+      currentReferer = currentUrl;
+      currentUrl = location.startsWith('http')
+          ? location
+          : Uri.parse(currentUrl).resolve(location).toString();
+    }
+
+    throw http.ClientException('Too many redirects', Uri.parse(currentUrl));
   }
 
   static Map<String, String> _parseCookies(String cookieHeader) {

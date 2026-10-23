@@ -5,9 +5,13 @@ import 'package:flutter/material.dart';
 import 'package:odoo_rpc/odoo_rpc.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../../core/services/odoo_session_manager.dart';
+import '../../../core/services/inventory_access_service.dart';
 import '../../../core/services/session_service.dart';
 import '../../../core/services/database_service.dart';
+import '../../../core/services/default_database_service.dart';
+import '../pages/login_layout.dart' show DatabaseExpiry;
 import '../pages/totp_page.dart';
+import '../utils/server_url_failure.dart';
 
 /// Provider for managing the login flow, including server validation and database fetching.
 class LoginProvider with ChangeNotifier {
@@ -16,9 +20,31 @@ class LoginProvider with ChangeNotifier {
   bool disableFields = false;
   String? database;
   String? errorMessage;
+
+  /// Set by [login] when credentials were valid but the server is missing
+  /// the required "Inventory" module — the session this attempt would have
+  /// created has already been discarded.
+  bool moduleMissing = false;
+
+  /// Set by [login] when credentials were valid but the user is a portal
+  /// user — the session this attempt would have created has already been
+  /// discarded.
+  bool accessDenied = false;
+
+  /// Set by [login] when credentials were valid but the database's Odoo
+  /// subscription has expired — the session this attempt would have created
+  /// has already been discarded.
+  bool databaseExpired = false;
   bool isLoading = false;
   bool isLoadingDatabases = false;
   List<String> dropdownItems = [];
+
+  /// The server would not list its databases and none could be detected, so
+  /// the database name is typed into [dbController] instead of picked.
+  bool manualDbEntryRequired = false;
+
+  /// A note under the database field, e.g. which database was detected.
+  String? dbInfoMessage;
   OdooClient? client;
   bool obscurePassword = true;
   List<String> _previousUrls = [];
@@ -33,12 +59,21 @@ class LoginProvider with ChangeNotifier {
   final TextEditingController urlController = TextEditingController();
   final TextEditingController emailController = TextEditingController();
   final TextEditingController passwordController = TextEditingController();
+  final TextEditingController dbController = TextEditingController();
 
   final OdooClient Function(String)? clientFactory;
   final DatabaseService _databaseService;
 
-  LoginProvider({this.clientFactory, DatabaseService? databaseService})
-    : _databaseService = databaseService ?? DatabaseService() {
+  /// Finds a server's database when it will not list them.
+  final Future<String?> Function(String baseUrl) _findDefaultDatabase;
+
+  LoginProvider({
+    this.clientFactory,
+    DatabaseService? databaseService,
+    Future<String?> Function(String baseUrl)? findDefaultDatabase,
+  }) : _databaseService = databaseService ?? DatabaseService(),
+       _findDefaultDatabase =
+           findDefaultDatabase ?? DefaultDatabaseService.getDefaultDatabase {
     _loadSavedCredentials();
   }
 
@@ -82,6 +117,7 @@ class LoginProvider with ChangeNotifier {
     urlController.dispose();
     emailController.dispose();
     passwordController.dispose();
+    dbController.dispose();
     super.dispose();
   }
 
@@ -338,6 +374,9 @@ class LoginProvider with ChangeNotifier {
     isLoadingDatabases = true;
     urlCheck = false;
     errorMessage = null;
+    manualDbEntryRequired = false;
+    dbInfoMessage = null;
+    dbController.clear();
 
     dropdownItems.clear();
     _safeNotifyListeners();
@@ -357,8 +396,14 @@ class LoginProvider with ChangeNotifier {
 
       final dbList = response;
       if (dbList.isEmpty) {
-        errorMessage = 'No databases found on this server.';
-        urlCheck = false;
+        final defaultDb = await _findDefaultDatabase(baseUrl);
+        if (defaultDb != null && defaultDb.isNotEmpty) {
+          _useDetectedDatabase(defaultDb);
+        } else {
+          errorMessage =
+              'This server does not expose the database list and no default database could be detected.';
+          urlCheck = false;
+        }
       } else {
         final uniqueDbList = dbList.toSet().toList();
         uniqueDbList.sort((a, b) => a.toString().compareTo(b.toString()));
@@ -424,37 +469,26 @@ class LoginProvider with ChangeNotifier {
           }
         }
       }
-    } on SocketException catch (e) {
-      if (e.toString().contains('Network is unreachable')) {
-        errorMessage =
-            'No internet connection. Please check your network settings and try again.';
-      } else if (e.toString().contains('Connection refused')) {
-        errorMessage =
-            'Server is not responding. Please verify the server URL and ensure the server is running.';
+    } on DatabaseListAccessDenied {
+      // The server answered but keeps its database list private
+      // (`list_db = False`): find the database another way, or ask for it.
+      _resetDatabaseState();
+      final defaultDb = await _findDefaultDatabase(
+        _normalizeUrl(urlController.text),
+      );
+      if (defaultDb != null && defaultDb.isNotEmpty) {
+        _useDetectedDatabase(defaultDb);
       } else {
-        errorMessage =
-            'Network error occurred. Please check your internet connection and server URL.';
+        manualDbEntryRequired = true;
+        urlCheck = true;
+        dbInfoMessage =
+            'Could not discover default database. Please enter it manually.';
       }
-      _resetDatabaseState();
-    } on TimeoutException catch (_) {
-      errorMessage =
-          'Connection timed out. The server may be slow or unreachable. Please try again.';
-      _resetDatabaseState();
-    } on OdooException catch (e) {
-      errorMessage = _formatOdooError(e);
-      _resetDatabaseState();
-    } on FormatException catch (e) {
-      if (e.toString().toLowerCase().contains('html')) {
-        errorMessage =
-            'Invalid server response. This may not be an Odoo server or the URL path is incorrect.';
-      } else {
-        errorMessage =
-            'Server sent invalid data format. Please verify this is an Odoo server.';
-      }
-      _resetDatabaseState();
     } catch (e) {
-      errorMessage =
-          'Unable to connect to server. Please verify the server URL is correct.';
+      // One classifier for every transport and protocol failure, so an
+      // `https://` address for an HTTP-only server says exactly that instead of
+      // falling through to a generic "verify the server URL".
+      errorMessage = serverUrlErrorMessage(e, scheme: _selectedProtocol);
       _resetDatabaseState();
     } finally {
       isLoadingDatabases = false;
@@ -466,6 +500,14 @@ class LoginProvider with ChangeNotifier {
     database = null;
     urlCheck = false;
     dropdownItems.clear();
+  }
+
+  void _useDetectedDatabase(String db) {
+    dropdownItems = [db];
+    database = db;
+    urlCheck = true;
+    errorMessage = null;
+    dbInfoMessage = 'Detected default database: $db';
   }
 
   String _formatOdooError(OdooException e) {
@@ -507,6 +549,9 @@ class LoginProvider with ChangeNotifier {
 
     isLoading = true;
     errorMessage = null;
+    moduleMissing = false;
+    accessDenied = false;
+    databaseExpired = false;
     disableFields = true;
     _safeNotifyListeners();
 
@@ -519,14 +564,73 @@ class LoginProvider with ChangeNotifier {
         throw Exception('Please fill in all required fields.');
       }
 
-      final loginSuccess = await OdooSessionManager.loginAndSaveSession(
-        serverUrl: serverUrl,
-        database: database!,
-        userLogin: userLogin,
-        password: password,
-      );
+      // Whatever was signed in before this attempt, restored if it fails.
+      // Null on a genuine first sign-in; non-null when this screen was
+      // opened to re-authenticate a stored account from "Switch Accounts",
+      // where a refused attempt must not sign out the account in use.
+      final previous = await OdooSessionManager.getCurrentSession();
+
+      // Nothing is written to the device until this account has passed the
+      // module/access checks below, so one this app refuses is never left
+      // saved on it.
+      OdooSessionManager.beginProvisionalSession();
+
+      final bool loginSuccess;
+      try {
+        loginSuccess = await OdooSessionManager.loginAndSaveSession(
+          serverUrl: serverUrl,
+          database: database!,
+          userLogin: userLogin,
+          password: password,
+        );
+      } catch (_) {
+        await OdooSessionManager.discardProvisionalSession(previous);
+        rethrow;
+      }
+
+      if (!loginSuccess) {
+        await OdooSessionManager.discardProvisionalSession(previous);
+      }
 
       if (loginSuccess) {
+        // An expired database is refused before anything else: none of it
+        // is usable, whatever modules or access rights it has.
+        if (await DatabaseExpiry.isCurrentSessionExpired()) {
+          await OdooSessionManager.discardProvisionalSession(previous);
+          databaseExpired = true;
+          return false;
+        }
+
+        // Module is checked first: a server missing Inventory is always
+        // reported as that, rather than blamed on the user's own access
+        // rights. Portal-user is only checked once the module is confirmed
+        // present.
+        final accessService = InventoryAccessService();
+
+        final inventoryInstalled =
+            await accessService.isInventoryModuleInstalled();
+        if (!inventoryInstalled) {
+          // There is no prior account to go back to on a fresh sign-in, so
+          // the provisional session is dropped outright. It was never
+          // written, so nothing is left behind to clean up.
+          await OdooSessionManager.discardProvisionalSession(previous);
+          moduleMissing = true;
+          errorMessage = InventoryAccessService.moduleMissingMessage;
+          return false;
+        }
+
+        final isPortal = await accessService.isPortalUser();
+        if (isPortal) {
+          await OdooSessionManager.discardProvisionalSession(previous);
+          accessDenied = true;
+          errorMessage = InventoryAccessService.portalUserMessage;
+          return false;
+        }
+
+        // Cleared every check — this account may now be written to the
+        // device.
+        await OdooSessionManager.commitProvisionalSession();
+
         await _saveCredentials();
         await _setAuthenticationTimestamp();
 

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../../../core/theme/app_theme.dart';
 import '../providers/location_provider.dart';
 
 class LocationCreateBottomSheet extends StatefulWidget {
@@ -56,19 +57,89 @@ class _LocationCreateBottomSheetState extends State<LocationCreateBottomSheet> {
     }
   }
 
+  /// §6 — field label above the input, with the red required marker.
+  Widget _fieldLabel(String text, bool isDark, {bool isRequired = false}) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Text.rich(
+        TextSpan(
+          text: text,
+          style: TextStyle(
+            fontSize: 16,
+            color: isDark ? Colors.white : AppTheme.textPrimary,
+          ),
+          children: isRequired
+              ? const [
+                  TextSpan(
+                    text: ' *',
+                    style: TextStyle(
+                      color: StatusColors.red,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ]
+              : null,
+        ),
+      ),
+    );
+  }
+
+  /// §6 — filled field, transparent border, primary focus ring, red on error.
+  InputDecoration _fieldDecoration(bool isDark, {String? hintText}) {
+    OutlineInputBorder border(Color color, [double width = 1]) =>
+        OutlineInputBorder(
+          borderRadius: BorderRadius.circular(AppRadius.md),
+          borderSide: BorderSide(color: color, width: width),
+        );
+    return InputDecoration(
+      hintText: hintText,
+      hintStyle: TextStyle(
+        fontWeight: FontWeight.w400,
+        fontStyle: FontStyle.italic,
+        color: isDark ? Colors.grey[400] : Colors.grey[600],
+      ),
+      filled: true,
+      fillColor: isDark ? Colors.grey[850] : AppTheme.inputFill,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+      border: border(Colors.transparent),
+      enabledBorder: border(Colors.transparent),
+      focusedBorder: border(AppTheme.primaryColor, 2),
+      errorBorder: border(StatusColors.red),
+      focusedErrorBorder: border(StatusColors.red, 2),
+      errorStyle: const TextStyle(color: StatusColors.red, fontSize: 12),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
+    final valueStyle = TextStyle(
+      fontWeight: FontWeight.w600,
+      color: isDark ? Colors.white : Colors.black87,
+    );
 
     return Container(
       height: MediaQuery.of(context).size.height * 0.7,
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF232323) : Colors.white,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+        color: isDark ? AppTheme.darkSurface : Colors.grey[50],
+        borderRadius: const BorderRadius.vertical(
+          top: Radius.circular(AppRadius.lg),
+        ),
       ),
       child: Column(
         children: [
+          Padding(
+            padding: const EdgeInsets.only(top: 12, bottom: 8),
+            child: Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: isDark ? Colors.grey[700] : Colors.grey[300],
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+          ),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
             child: Row(
@@ -97,15 +168,18 @@ class _LocationCreateBottomSheetState extends State<LocationCreateBottomSheet> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    _fieldLabel('Name', isDark, isRequired: true),
                     TextFormField(
                       controller: _nameCtrl,
-                      decoration: const InputDecoration(
-                        labelText: 'Name',
+                      style: valueStyle,
+                      decoration: _fieldDecoration(
+                        isDark,
                         hintText: 'Enter location name',
                       ),
                       validator: (v) => (v == null || v.trim().isEmpty) ? 'Name is required' : null,
                     ),
                     const SizedBox(height: 12),
+                    _fieldLabel('Usage', isDark),
                     DropdownButtonFormField<String>(
                       value: _usage,
                       items: const [
@@ -118,14 +192,22 @@ class _LocationCreateBottomSheetState extends State<LocationCreateBottomSheet> {
                         DropdownMenuItem(value: 'transit', child: Text('transit')),
                       ],
                       onChanged: (v) => setState(() => _usage = v ?? 'internal'),
-                      decoration: const InputDecoration(labelText: 'Usage'),
+                      decoration: _fieldDecoration(isDark),
+                      borderRadius: BorderRadius.circular(AppRadius.lg),
+                      elevation: 4,
+                      menuMaxHeight: 320,
+                      dropdownColor: isDark
+                          ? AppTheme.darkPopupSurface
+                          : Colors.white,
                     ),
                     const SizedBox(height: 12),
+                    _fieldLabel('Parent Location ID (optional)', isDark),
                     TextFormField(
                       controller: _parentIdCtrl,
                       keyboardType: TextInputType.number,
-                      decoration: const InputDecoration(
-                        labelText: 'Parent Location ID (optional)',
+                      style: valueStyle,
+                      decoration: _fieldDecoration(
+                        isDark,
                         hintText: 'Enter numeric id',
                       ),
                     ),
@@ -137,23 +219,50 @@ class _LocationCreateBottomSheetState extends State<LocationCreateBottomSheet> {
           ),
           Padding(
             padding: const EdgeInsets.all(20),
-            child: SizedBox(
-              width: double.infinity,
-              child: ElevatedButton.icon(
-                onPressed: _submitting ? null : _submit,
-                icon: _submitting
-                    ? const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                      )
-                    : const Icon(Icons.check),
-                label: Text(_submitting ? 'Creating...' : 'Create'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: theme.primaryColor,
-                  foregroundColor: Colors.white,
+            child: Row(
+              children: [
+                Expanded(
+                  child: SizedBox(
+                    height: 48,
+                    child: OutlinedButton(
+                      onPressed: () => Navigator.pop(context),
+                      child: const Text('Cancel'),
+                    ),
+                  ),
                 ),
-              ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: SizedBox(
+                    height: 48,
+                    child: ElevatedButton.icon(
+                      onPressed: _submitting ? null : _submit,
+                      icon: _submitting
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                            )
+                          : const Icon(Icons.check),
+                      label: Text(
+                        _submitting ? 'Creating...' : 'Create',
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      style: ElevatedButton.styleFrom(
+                        elevation: 0,
+                        backgroundColor: theme.primaryColor,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(AppRadius.md),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
         ],

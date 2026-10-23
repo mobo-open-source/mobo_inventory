@@ -64,6 +64,10 @@ class AppRoutes {
 
   static const String receiptList = '/receipt_list';
 
+  static const String internalTransferList = '/internal_transfer_list';
+
+  static const String posOrderList = '/pos_order_list';
+
   static const String missingInventory = '/missing_inventory';
 
   static const String fullImage = '/full_image';

@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:hugeicons/hugeicons.dart';
 
+import '../../../core/theme/app_theme.dart';
+import '../../../shared/widgets/cards/status_info_card.dart';
 import '../models/move_history_item.dart';
 
 /// A screen providing granular details for a specific stock movement (move line).
@@ -14,10 +16,10 @@ class MoveHistoryDetailScreen extends StatelessWidget {
   const MoveHistoryDetailScreen({super.key, required this.item});
 
   Color _qtyColor(double q) => q > 0
-      ? Colors.green
+      ? StatusColors.green
       : q < 0
-      ? Colors.red
-      : Colors.grey;
+      ? StatusColors.red
+      : StatusColors.grey;
 
   String _statusLabel(String? state) {
     switch (state) {
@@ -40,25 +42,7 @@ class MoveHistoryDetailScreen extends StatelessWidget {
     }
   }
 
-  Color _statusColor(String? state) {
-    switch (state) {
-      case 'draft':
-        return Colors.blueGrey;
-      case 'waiting':
-      case 'confirmed':
-        return Colors.amber;
-      case 'partially_available':
-        return Colors.deepPurple;
-      case 'assigned':
-        return Colors.blue;
-      case 'done':
-        return Colors.green;
-      case 'cancel':
-        return Colors.red;
-      default:
-        return Colors.grey;
-    }
-  }
+  Color _statusColor(String? state) => StatusColors.forState(state);
 
   Widget _row(
     BuildContext context, {
@@ -120,11 +104,9 @@ class MoveHistoryDetailScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
+    final qtyColor = item.quantity < 0 ? StatusColors.red : StatusColors.green;
 
     return Scaffold(
-      backgroundColor: isDark
-          ? const Color(0xFF121212)
-          : const Color(0xFFF5F5F5),
       appBar: AppBar(
         backgroundColor: theme.scaffoldBackgroundColor,
         elevation: 0,
@@ -148,93 +130,23 @@ class MoveHistoryDetailScreen extends StatelessWidget {
         padding: const EdgeInsets.all(16),
         child: Column(
           children: [
-            _buildInfoCard(
-              isDark,
-              children: [
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Expanded(
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  item.product ?? 'Unknown product',
-                                  style: TextStyle(
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.w600,
-                                    color: isDark
-                                        ? Colors.white
-                                        : Colors.black87,
-                                  ),
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  item.reference ?? '-',
-                                  style: TextStyle(
-                                    fontSize: 13,
-                                    color: isDark
-                                        ? Colors.grey[400]
-                                        : Colors.grey[700],
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 4,
-                      ),
-                      decoration: BoxDecoration(
-                        color: _statusColor(item.status).withOpacity(0.12),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Text(
-                        _statusLabel(item.status),
-                        style: TextStyle(
-                          color: _statusColor(item.status),
-                          fontWeight: FontWeight.w700,
-                          fontSize: 12,
-                        ),
-                      ),
-                    ),
-                  ],
+            StatusInfoCard(
+              title: item.product ?? 'Unknown product',
+              subtitle: item.reference ?? '-',
+              statusLabel: _statusLabel(item.status),
+              statusColor: _statusColor(item.status),
+              fields: [
+                StatusInfoField(
+                  icon: Icons.scale,
+                  label: 'Quantity',
+                  value:
+                      '${item.quantity >= 0 ? '+' : ''}${item.quantity.toStringAsFixed(2)}',
                 ),
-                const SizedBox(height: 16),
-                Row(
-                  children: [
-                    Expanded(
-                      child: _row(
-                        context,
-                        icon: Icons.scale,
-                        label: 'Quantity',
-                        value:
-                            '${item.quantity >= 0 ? '+' : ''}${item.quantity.toStringAsFixed(2)}',
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: _row(
-                        context,
-                        icon: HugeIcons.strokeRoundedCalendar03,
-                        label: 'Date',
-                        value:
-                            item.date?.toLocal().toString().substring(0, 16) ??
-                            '-',
-                      ),
-                    ),
-                  ],
+                StatusInfoField(
+                  icon: HugeIcons.strokeRoundedCalendar03,
+                  label: 'Date',
+                  value:
+                      item.date?.toLocal().toString().substring(0, 16) ?? '-',
                 ),
               ],
             ),
@@ -290,23 +202,18 @@ class MoveHistoryDetailScreen extends StatelessWidget {
 
             _buildInfoCard(
               isDark,
-              backgroundColor: (item.quantity < 0)
-                  ? const Color(0xFFFDECEC)
-                  : const Color(0xFFECF8EF),
-              borderColor: (item.quantity < 0)
-                  ? const Color(0xFFEC0700)
-                  : const Color(0xFF43B75D),
+              backgroundColor: Color.alphaBlend(
+                isDark
+                    ? StatusColors.backgroundDark(qtyColor)
+                    : StatusColors.backgroundLight(qtyColor),
+                isDark ? AppTheme.darkSurface : Colors.white,
+              ),
+              borderColor: qtyColor,
               children: [
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Icon(
-                      Icons.info_outline,
-                      size: 18,
-                      color: (item.quantity < 0)
-                          ? const Color(0xFFEC0700)
-                          : const Color(0xFF43B75D),
-                    ),
+                    Icon(Icons.info_outline, size: 18, color: qtyColor),
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
@@ -338,17 +245,10 @@ class MoveHistoryDetailScreen extends StatelessWidget {
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         color:
-            backgroundColor ??
-            (isDark ? const Color(0xFF1E1E1E) : Colors.white),
-        borderRadius: BorderRadius.circular(16),
+            backgroundColor ?? (isDark ? AppTheme.darkSurface : Colors.white),
+        borderRadius: BorderRadius.circular(AppRadius.lg),
         border: borderColor != null ? Border.all(color: borderColor) : null,
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 10,
-            offset: const Offset(0, 2),
-          ),
-        ],
+        boxShadow: AppShadows.panel(isDark),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,

@@ -17,9 +17,13 @@ import '../../../core/services/odoo_session_manager.dart';
 import '../../../shared/widgets/snackbars/custom_snackbar.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../models/inventory_product.dart';
+import '../providers/inventory_product_provider.dart';
+import '../../../main.dart';
 import 'package:provider/provider.dart';
 import '../../dashboard/providers/last_opened_provider.dart';
 import '../../../core/routing/app_routes.dart';
+import '../../../core/utils/base64_utils.dart';
+import '../utils/inventory_access.dart';
 
 /// Screen displaying comprehensive details for a single inventory product, including pricing and stock metrics.
 class InventoryProductDetailScreen extends StatefulWidget {
@@ -151,11 +155,8 @@ class _InventoryProductDetailScreenState
         }
 
         Uint8List? img;
-        final imgStr = map['image_1920'];
-        if (imgStr != null &&
-            imgStr is String &&
-            imgStr.isNotEmpty &&
-            imgStr != 'false') {
+        final imgStr = odooBinaryToBase64(map['image_1920']);
+        if (imgStr.isNotEmpty && imgStr != 'false') {
           try {
             img = base64Decode(imgStr);
           } catch (_) {}
@@ -214,13 +215,14 @@ class _InventoryProductDetailScreenState
   Future<void> _onArchiveProduct() async {
     final confirmed = await CommonDialog.confirm(
       context,
-      title: 'Archive Product',
+      title: 'Archive Product?',
       message:
           'Are you sure you want to archive this product? It will be hidden from standard views.',
       confirmText: 'Archive',
       cancelText: 'Cancel',
       destructive: true,
-      icon: Icons.archive_outlined,
+      icon: HugeIcons.strokeRoundedArchive,
+      topIconCentered: true,
     );
 
     if (confirmed == true) {
@@ -234,13 +236,25 @@ class _InventoryProductDetailScreenState
           ],
           'kwargs': {},
         });
-        if (mounted) {
-          CustomSnackbar.showSuccess(context, 'Product archived');
-          context.pop(true);
+        if (!mounted) return;
+        // Refresh the product list so the archived product disappears.
+        context.read<InventoryProductProvider>().fetchProducts(
+          forceRefresh: true,
+        );
+        // The snackbar is a dialog route, so pop this screen first and show
+        // it on the root navigator; otherwise the pop would close the snackbar.
+        context.pop(true);
+        final targetContext = navigatorKey.currentContext;
+        if (targetContext != null && targetContext.mounted) {
+          CustomSnackbar.showSuccess(
+            targetContext,
+            'Product archived successfully',
+          );
         }
       } catch (e) {
-        if (mounted)
-          CustomSnackbar.showSuccess(context, 'Failed to archive: $e');
+        if (mounted) {
+          CustomSnackbar.showError(context, 'Failed to archive product: $e');
+        }
       }
     }
   }
@@ -457,8 +471,8 @@ class _InventoryProductDetailScreenState
                   icon: Icons.email_outlined,
                   background: (isDark
                       ? Colors.white.withOpacity(0.06)
-                      : Colors.blue.withOpacity(0.08)),
-                  iconColor: Colors.blue,
+                      : StatusColors.blue.withValues(alpha: 0.1)),
+                  iconColor: StatusColors.blue,
                   onTap: () async {
                     context.pop();
                     await _shareViaEmail();
@@ -466,11 +480,11 @@ class _InventoryProductDetailScreenState
                 ),
                 _ShareAction(
                   label: 'WhatsApp',
-                  icon: FontAwesomeIcons.whatsapp,
+                  faIcon: FontAwesomeIcons.whatsapp,
                   background: (isDark
                       ? Colors.white.withOpacity(0.06)
-                      : Colors.green.withOpacity(0.08)),
-                  iconColor: Colors.green,
+                      : StatusColors.green.withValues(alpha: 0.1)),
+                  iconColor: StatusColors.green,
                   onTap: () async {
                     context.pop();
                     await _shareViaWhatsApp();
@@ -481,8 +495,8 @@ class _InventoryProductDetailScreenState
                   icon: Icons.share,
                   background: (isDark
                       ? Colors.white.withOpacity(0.06)
-                      : Colors.orange.withOpacity(0.10)),
-                  iconColor: Colors.orange,
+                      : StatusColors.orange.withValues(alpha: 0.1)),
+                  iconColor: StatusColors.orange,
                   onTap: () async {
                     context.pop();
                     await _shareViaSystem();
@@ -500,9 +514,10 @@ class _InventoryProductDetailScreenState
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final primaryColor = Theme.of(context).primaryColor;
+    // Edit / Archive only for users Odoo lets write products.
+    final access = InventoryAccess.watch(context);
 
     return Scaffold(
-      backgroundColor: isDark ? Colors.black : Colors.grey[50],
       appBar: AppBar(
         title: Text(
           'Product Details',
@@ -521,36 +536,38 @@ class _InventoryProductDetailScreenState
           onPressed: () => context.pop(_updated),
         ),
         actions: [
-          IconButton(
-            tooltip: 'Edit Product',
-            onPressed: _product == null
-                ? null
-                : () async {
-                    final res = await context.pushNamed<bool>(
-                      AppRoutes.inventoryProductEdit,
-                      extra: {'productId': widget.productId},
-                    );
-                    if (res == true && mounted) {
-                      CustomSnackbar.showSuccess(
-                        context,
-                        'Product updated successfully',
+          if (access.canEditProducts)
+            IconButton(
+              tooltip: 'Edit Product',
+              onPressed: _product == null
+                  ? null
+                  : () async {
+                      final res = await context.pushNamed<bool>(
+                        AppRoutes.inventoryProductEdit,
+                        extra: {'productId': widget.productId},
                       );
-                      await _load();
-                      setState(() {
-                        _updated = true;
-                      });
-                    }
-                  },
-            icon: Icon(
-              HugeIcons.strokeRoundedPencilEdit02,
-              color: Theme.of(context).brightness == Brightness.dark
-                  ? Colors.grey[400]
-                  : Colors.grey[600],
+                      if (res == true && mounted) {
+                        CustomSnackbar.showSuccess(
+                          context,
+                          'Product updated successfully',
+                        );
+                        await _load();
+                        setState(() {
+                          _updated = true;
+                        });
+                      }
+                    },
+              icon: Icon(
+                HugeIcons.strokeRoundedPencilEdit02,
+                color: Theme.of(context).brightness == Brightness.dark
+                    ? Colors.grey[400]
+                    : Colors.grey[600],
+              ),
             ),
-          ),
 
           PopupMenuButton<String>(
             enabled: !_isLoading && _product != null,
+            position: PopupMenuPosition.under,
             icon: Icon(
               Icons.more_vert,
               color:
@@ -558,91 +575,28 @@ class _InventoryProductDetailScreenState
                           ? Colors.grey[400]
                           : Colors.grey[600])
                       ?.withOpacity(_isLoading ? 0.4 : 1.0),
-              size: 20,
-            ),
-            color: Theme.of(context).brightness == Brightness.dark
-                ? Colors.grey[900]
-                : Colors.white,
-            elevation: 8,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(16),
+              size: 22,
             ),
             itemBuilder: (context) => [
-              PopupMenuItem<String>(
+              _menuItem(
                 value: 'share_product',
-                child: Row(
-                  children: [
-                    Icon(
-                      HugeIcons.strokeRoundedShare08,
-                      color: Theme.of(context).brightness == Brightness.dark
-                          ? Colors.grey[300]
-                          : Colors.grey[800],
-                      size: 20,
-                    ),
-                    const SizedBox(width: 12),
-                    Text(
-                      'Share Product',
-                      style: TextStyle(
-                        color: Theme.of(context).brightness == Brightness.dark
-                            ? Colors.white
-                            : Colors.black87,
-                        fontWeight: FontWeight.w500,
-                        fontSize: 15,
-                      ),
-                    ),
-                  ],
-                ),
+                label: 'Share Product',
+                icon: HugeIcons.strokeRoundedShare08,
+                isDark: isDark,
               ),
-              PopupMenuItem<String>(
+              _menuItem(
                 value: 'generate_barcode',
-                child: Row(
-                  children: [
-                    Icon(
-                      HugeIcons.strokeRoundedQrCode,
-                      color: Theme.of(context).brightness == Brightness.dark
-                          ? Colors.grey[300]
-                          : Colors.grey[800],
-                      size: 20,
-                    ),
-                    const SizedBox(width: 12),
-                    Text(
-                      'Generate Barcode',
-                      style: TextStyle(
-                        color: Theme.of(context).brightness == Brightness.dark
-                            ? Colors.white
-                            : Colors.black87,
-                        fontWeight: FontWeight.w500,
-                        fontSize: 15,
-                      ),
-                    ),
-                  ],
-                ),
+                label: 'Generate Barcode',
+                icon: HugeIcons.strokeRoundedBarCode01,
+                isDark: isDark,
               ),
-              PopupMenuItem<String>(
-                value: 'archive_product',
-                child: Row(
-                  children: [
-                    Icon(
-                      HugeIcons.strokeRoundedArchive03,
-                      color: Theme.of(context).brightness == Brightness.dark
-                          ? Colors.grey[300]
-                          : Colors.grey[800],
-                      size: 20,
-                    ),
-                    const SizedBox(width: 12),
-                    Text(
-                      'Archive Product',
-                      style: TextStyle(
-                        color: Theme.of(context).brightness == Brightness.dark
-                            ? Colors.white
-                            : Colors.black87,
-                        fontWeight: FontWeight.w500,
-                        fontSize: 15,
-                      ),
-                    ),
-                  ],
+              if (access.canArchiveProducts)
+                _menuItem(
+                  value: 'archive_product',
+                  label: 'Archive Product',
+                  icon: HugeIcons.strokeRoundedArchive,
+                  isDark: isDark,
                 ),
-              ),
             ],
             onSelected: (value) async {
               switch (value) {
@@ -793,23 +747,39 @@ class _InventoryProductDetailScreenState
 
     return Container(
       padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: isDark ? Colors.grey[900] : Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
+      decoration: AppTheme.panelDecoration(isDark),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           _buildHeaderCard(context, isDark),
           const SizedBox(height: 16),
           _buildQuickMetrics(context, isDark),
+        ],
+      ),
+    );
+  }
+
+  /// A row of the "more options" menu: the action's icon, then its label.
+  PopupMenuItem<String> _menuItem({
+    required String value,
+    required String label,
+    required IconData icon,
+    required bool isDark,
+  }) {
+    return PopupMenuItem<String>(
+      value: value,
+      child: Row(
+        children: [
+          Icon(
+            icon,
+            size: 20,
+            color: isDark ? Colors.grey[400] : Colors.grey[600],
+          ),
+          const SizedBox(width: 12),
+          Text(
+            label,
+            style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+          ),
         ],
       ),
     );
@@ -927,8 +897,10 @@ class _InventoryProductDetailScreenState
           child: _buildMetricCard(
             isDark,
             'Available',
-            '${_product!.qtyAvailable.toStringAsFixed(0)}',
-            _product!.qtyAvailable > 0 ? Colors.black : AppTheme.primaryColor,
+            _product!.qtyAvailable.toStringAsFixed(0),
+            // Green with stock, red at zero (or below).
+            _product!.qtyAvailable > 0 ? StatusColors.green : StatusColors.red,
+            colorValue: true,
           ),
         ),
         const SizedBox(width: 12),
@@ -937,28 +909,34 @@ class _InventoryProductDetailScreenState
             isDark,
             'Status',
             _active ? 'Active' : 'Archived',
-            _active ? AppTheme.primaryColor : Colors.black,
+            _active ? StatusColors.green : StatusColors.red,
+            colorValue: true,
           ),
         ),
       ],
     );
   }
 
+  /// A tile of the header's quick metrics. [color] is the tile's stroke; with
+  /// [colorValue] the value is drawn in it as well.
   Widget _buildMetricCard(
     bool isDark,
     String label,
     String value,
-    Color color,
-  ) {
+    Color color, {
+    bool colorValue = false,
+  }) {
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
       decoration: BoxDecoration(
-        color: isDark ? Colors.grey[900] : Colors.white,
+        color: isDark ? Colors.grey[850] : Colors.white,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
           color: isDark
-              ? (color == Colors.black ? Colors.white : color.withOpacity(0.3))
-              : color.withOpacity(0.3),
+              ? (color == Colors.black
+                    ? Colors.white
+                    : color.withValues(alpha: 0.3))
+              : color.withValues(alpha: 0.3),
         ),
       ),
       child: Column(
@@ -967,6 +945,7 @@ class _InventoryProductDetailScreenState
             label,
             style: TextStyle(
               fontSize: 12,
+              fontWeight: FontWeight.w500,
               color: isDark ? Colors.grey[400] : Colors.grey[600],
             ),
           ),
@@ -976,7 +955,7 @@ class _InventoryProductDetailScreenState
             style: TextStyle(
               fontSize: 16,
               fontWeight: FontWeight.bold,
-              color: isDark ? Colors.grey[400] : Colors.grey[600],
+              color: colorValue ? color : AppTheme.labelColor(isDark),
             ),
           ),
         ],
@@ -993,17 +972,7 @@ class _InventoryProductDetailScreenState
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: isDark ? Colors.grey[900] : Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
+      decoration: AppTheme.panelDecoration(isDark),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -1061,8 +1030,8 @@ class _InventoryProductDetailScreenState
 
   Widget _buildShimmerLoading(bool isDark) {
     return Shimmer.fromColors(
-      baseColor: isDark ? Colors.grey[800]! : Colors.grey[300]!,
-      highlightColor: isDark ? Colors.grey[700]! : Colors.grey[100]!,
+      baseColor: isDark ? Colors.grey[800]! : Colors.grey[200]!,
+      highlightColor: isDark ? Colors.grey[700]! : Colors.grey[50]!,
       child: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -1111,39 +1080,64 @@ class _InventoryProductDetailScreenState
 
 class _ShareAction extends StatelessWidget {
   final String label;
-  final IconData icon;
+  final IconData? icon;
+  final FaIconData? faIcon;
   final Color background;
   final Color iconColor;
   final VoidCallback onTap;
 
   const _ShareAction({
     required this.label,
-    required this.icon,
+    this.icon,
+    this.faIcon,
     required this.background,
     required this.iconColor,
     required this.onTap,
-  });
+  }) : assert(icon != null || faIcon != null, 'Provide either icon or faIcon');
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      children: [
-        InkWell(
-          borderRadius: BorderRadius.circular(16),
-          onTap: onTap,
-          child: Container(
-            width: 64,
-            height: 64,
-            decoration: BoxDecoration(
-              color: background,
-              borderRadius: BorderRadius.circular(16),
-            ),
-            child: Icon(icon, color: iconColor, size: 28),
-          ),
-        ),
-        const SizedBox(height: 8),
-        Text(label, style: Theme.of(context).textTheme.bodySmall),
-      ],
+    // Each action takes an equal share of the row, so the tiles shrink on
+    // narrow screens or large text instead of overflowing, and never grow
+    // past 64px on wide ones.
+    return Expanded(
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final size = (constraints.maxWidth - 12).clamp(40.0, 64.0);
+          final iconSize = size * 0.44;
+          return Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Material(
+                color: background,
+                borderRadius: BorderRadius.circular(16),
+                clipBehavior: Clip.antiAlias,
+                child: InkWell(
+                  onTap: onTap,
+                  child: SizedBox(
+                    width: size,
+                    height: size,
+                    child: Center(
+                      child: faIcon != null
+                          ? FaIcon(faIcon, color: iconColor, size: iconSize)
+                          : Icon(icon, color: iconColor, size: iconSize),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ),
+            ],
+          );
+        },
+      ),
     );
   }
 }

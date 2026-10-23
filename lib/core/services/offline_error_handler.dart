@@ -120,8 +120,7 @@ class OfflineErrorHandler {
     }
 
     final odooMessage = OdooErrorMapper.toUserMessage(error);
-    if (odooMessage !=
-        'Unexpected server error. Please try again or contact support.') {
+    if (odooMessage != OdooErrorMapper.fallbackMessage) {
       return odooMessage;
     }
 

@@ -2,6 +2,8 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:hugeicons/hugeicons.dart';
 
+import '../../../core/theme/app_theme.dart';
+
 /// A list tile representing a single product in the inventory product list.
 class InventoryProductListTile extends StatelessWidget {
   final String id;
@@ -56,29 +58,9 @@ class InventoryProductListTile extends StatelessWidget {
         borderRadius: BorderRadius.circular(12),
         child: Container(
           margin: const EdgeInsets.only(bottom: 12),
-          decoration: BoxDecoration(
-            color: isDark ? Colors.grey[850] : Colors.white,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: isDark ? Colors.grey[850]! : Colors.grey[200]!,
-              width: 0.5,
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: const Color(0xFF000000).withOpacity(0.05),
-                blurRadius: 16,
-                offset: const Offset(0, 6),
-                spreadRadius: 2,
-              ),
-            ],
-          ),
+          decoration: AppTheme.cardDecoration(isDark),
           child: Padding(
-            padding: const EdgeInsets.only(
-              left: 16,
-              right: 12,
-              top: 12,
-              bottom: 12,
-            ),
+            padding: const EdgeInsets.all(14),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -156,12 +138,15 @@ class InventoryProductListTile extends StatelessWidget {
                     ],
                   ),
                 ),
-                const SizedBox(width: 8),
-                SizedBox(
-                  width: 24,
-                  height: 24,
-                  child: buildTrailingActions(context),
-                ),
+                // No actions left for this user: no menu trigger either.
+                if (_hasActions) ...[
+                  const SizedBox(width: 8),
+                  SizedBox(
+                    width: 24,
+                    height: 24,
+                    child: buildTrailingActions(context),
+                  ),
+                ],
               ],
             ),
           ),
@@ -292,6 +277,12 @@ class InventoryProductListTile extends StatelessWidget {
     return '—';
   }
 
+  bool get _canLocate => qtyOnHand != 0 && onLocate != null;
+
+  /// Whether the row has any action to offer ("Edit" is withheld from users
+  /// who may not count stock).
+  bool get _hasActions => _canLocate || onEdit != null;
+
   Widget buildTrailingActions(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
@@ -300,12 +291,27 @@ class InventoryProductListTile extends StatelessWidget {
         : colorScheme.primary.withOpacity(0.16));
     final showLocate = qtyOnHand != 0;
 
+    // "Edit" is the only action (a product with nothing on hand has no
+    // "Locate"): a button of its own, not a menu with a single entry.
+    if (!_canLocate && onEdit != null) {
+      return IconButton(
+        tooltip: 'Edit',
+        padding: EdgeInsets.zero,
+        constraints: const BoxConstraints(),
+        onPressed: onEdit,
+        icon: Icon(
+          HugeIcons.strokeRoundedPencilEdit02,
+          size: 20,
+          color: isDark ? Colors.white : Colors.black,
+        ),
+      );
+    }
+
     return SizedBox(
       height: 30,
       child: PopupMenuButton<String>(
         tooltip: 'Actions',
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        color: isDark ? Colors.grey[900] : Colors.white,
+        position: PopupMenuPosition.under,
         icon: Icon(
           Icons.more_vert,
           size: 20,
@@ -319,23 +325,13 @@ class InventoryProductListTile extends StatelessWidget {
           }
         },
         itemBuilder: (ctx) {
-          final iconColor = isDark ? Colors.white : Colors.black;
+          final itemTextColor = isDark ? Colors.white : Colors.black87;
           final List<PopupMenuEntry<String>> items = [];
           if (showLocate && onLocate != null) {
             items.add(
               PopupMenuItem<String>(
                 value: 'locate',
-                child: Row(
-                  children: [
-                    Icon(
-                      Icons.location_on_outlined,
-                      size: 18,
-                      color: iconColor,
-                    ),
-                    const SizedBox(width: 8),
-                    const Text('Locate'),
-                  ],
-                ),
+                child: Text('Locate', style: TextStyle(color: itemTextColor)),
               ),
             );
           }
@@ -343,26 +339,7 @@ class InventoryProductListTile extends StatelessWidget {
             items.add(
               PopupMenuItem<String>(
                 value: 'edit',
-                child: Row(
-                  children: [
-                    Icon(
-                      HugeIcons.strokeRoundedPencilEdit02,
-                      size: 18,
-                      color: iconColor,
-                    ),
-                    const SizedBox(width: 8),
-                    const Text('Edit'),
-                  ],
-                ),
-              ),
-            );
-          }
-          if (items.isEmpty) {
-            items.add(
-              const PopupMenuItem<String>(
-                value: 'none',
-                enabled: false,
-                child: Text('No actions'),
+                child: Text('Edit', style: TextStyle(color: itemTextColor)),
               ),
             );
           }

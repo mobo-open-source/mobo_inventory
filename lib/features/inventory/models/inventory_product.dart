@@ -1,3 +1,5 @@
+import '../../../core/utils/base64_utils.dart';
+
 /// Model representing an Odoo product product with inventory-specific data.
 class InventoryProduct {
   final int id;
@@ -12,6 +14,9 @@ class InventoryProduct {
   final double freeQty;
   final double avgCost;
   final double totalValue;
+
+  /// Sales price (`lst_price`: the template's price plus any variant extra).
+  final double listPrice;
   final List? uomId;
   final List? categId;
   final String? imageSmall;
@@ -29,6 +34,7 @@ class InventoryProduct {
     required this.freeQty,
     required this.avgCost,
     required this.totalValue,
+    this.listPrice = 0.0,
     this.uomId,
     this.categId,
     this.imageSmall,
@@ -38,6 +44,11 @@ class InventoryProduct {
     String? safeString(dynamic value) {
       if (value == null || value == false) return null;
       return value.toString();
+    }
+
+    String? safeBinary(dynamic value) {
+      final b64 = odooBinaryToBase64(value);
+      return b64.isEmpty ? null : b64;
     }
 
     List<dynamic>? parseM2O(dynamic value) {
@@ -95,9 +106,10 @@ class InventoryProduct {
       freeQty: asDouble(json['free_qty']),
       avgCost: stdPrice,
       totalValue: computedTotalValue,
+      listPrice: asDouble(json['lst_price'] ?? json['list_price']),
       uomId: parseM2O(json['uom_id']),
       categId: parseM2O(json['categ_id']),
-      imageSmall: safeString(json['image_128']),
+      imageSmall: safeBinary(json['image_128']),
     );
   }
 

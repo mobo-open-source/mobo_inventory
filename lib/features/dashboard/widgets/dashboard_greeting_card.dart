@@ -58,14 +58,6 @@ class DashboardGreetingCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: theme.primaryColor,
         borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: theme.primaryColor.withOpacity(0.3),
-            offset: const Offset(0, 4),
-            blurRadius: 12,
-            spreadRadius: 0,
-          ),
-        ],
       ),
       child: Row(
         children: [
@@ -164,13 +156,6 @@ class DashboardGreetingCard extends StatelessWidget {
       decoration: BoxDecoration(
         shape: BoxShape.circle,
         border: Border.all(color: Colors.white.withOpacity(0.3), width: 2),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.2),
-            offset: const Offset(0, 2),
-            blurRadius: 8,
-          ),
-        ],
       ),
       child: OdooAvatar(
         imageBase64: userAvatar,

@@ -1,3 +1,5 @@
+import '../../../core/utils/odoo_value.dart';
+
 /// Represents an inventory adjustment record in Odoo (`stock.quant`).
 class InventoryAdjustment {
   final int? id;
@@ -95,7 +97,7 @@ class InventoryAdjustment {
       onHandQuantity: onHand,
       countedQuantity: counted,
       difference: counted - onHand,
-      scheduledDate: json['inventory_date']?.toString(),
+      scheduledDate: odooString(json['inventory_date']),
       user: user,
     );
   }

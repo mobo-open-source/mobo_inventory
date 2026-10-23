@@ -27,6 +27,11 @@ class OdooMetadataService {
         rethrow;
       }
 
+      // The `ir.model` lookup above failed for a reason OTHER than
+      // connectivity (e.g. an access error on `ir.model` itself, or a
+      // session hiccup) — that is NOT proof the model is missing, so fall
+      // through to a second, more direct check before drawing any
+      // conclusion.
       try {
         final res = await OdooSessionManager.callKwWithCompany({
           'model': model,
@@ -44,8 +49,30 @@ class OdooMetadataService {
           rethrow;
         }
 
-        _modelCache[model] = false;
-        return false;
+        // Only cache "missing" when the server explicitly says the model
+        // doesn't exist. Any other failure here (access rights, an expired
+        // session that hadn't refreshed yet, a transient server error) is
+        // ambiguous and must NOT be memoized as "not installed" — that cache
+        // never expires, so a single bad moment (e.g. mid session-refresh)
+        // would permanently hide this feature for the rest of the app
+        // session even after the real condition clears up.
+        final errStr = e2.toString().toLowerCase();
+        final confirmedMissing = errStr.contains('invalid model name') ||
+            errStr.contains("keyerror: '${model.toLowerCase()}'") ||
+            errStr.contains('object has no attribute') ||
+            (errStr.contains('model') &&
+                (errStr.contains('does not exist') ||
+                    errStr.contains('not found')));
+
+        if (confirmedMissing) {
+          _modelCache[model] = false;
+          return false;
+        }
+
+        // Ambiguous failure — don't cache anything, assume present so the
+        // real data fetch proceeds and surfaces its own accurate error
+        // instead of a misleading "please install this app" message.
+        return true;
       }
     }
   }

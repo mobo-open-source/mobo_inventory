@@ -33,10 +33,8 @@ class _ShimmerState extends State<Shimmer> with SingleTickerProviderStateMixin {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final base = isDark ? const Color(0xFF2A2A2A) : const Color(0xffF0F3F5);
-    final highlight = isDark
-        ? const Color(0xFF3A3A3A)
-        : const Color(0xffF7FAFC);
+    final base = isDark ? Colors.grey[800]! : Colors.grey[200]!;
+    final highlight = isDark ? Colors.grey[700]! : Colors.grey[50]!;
 
     return AnimatedBuilder(
       animation: _controller,
@@ -92,7 +90,7 @@ class SkeletonBox extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final color = isDark ? const Color(0xFF2A2A2A) : const Color(0xffE8EEF2);
+    final color = isDark ? Colors.grey[800]! : Colors.grey[200]!;
     return ClipRRect(
       borderRadius: borderRadius,
       child: Shimmer(
@@ -117,7 +115,7 @@ class SkeletonLine extends StatelessWidget {
     return SkeletonBox(
       height: height,
       width: width,
-      borderRadius: BorderRadius.circular(6),
+      borderRadius: BorderRadius.circular(4),
     );
   }
 }

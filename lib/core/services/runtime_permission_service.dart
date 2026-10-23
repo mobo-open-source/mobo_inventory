@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
+import '../../shared/widgets/dialogs/common_dialog.dart';
 
 /// Service for handling runtime permission requests and displaying rationales.
 class RuntimePermissionService {
@@ -70,19 +71,13 @@ class RuntimePermissionService {
   ) async {
     final shouldOpenSettings = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: Text(title),
-        content: Text(message),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Not Now'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Open Settings'),
-          ),
-        ],
+      builder: (context) => CommonDialog(
+        title: title,
+        message: message,
+        secondaryLabel: 'Not Now',
+        onSecondary: () => Navigator.pop(context, false),
+        primaryLabel: 'Open Settings',
+        onPrimary: () => Navigator.pop(context, true),
       ),
     );
 

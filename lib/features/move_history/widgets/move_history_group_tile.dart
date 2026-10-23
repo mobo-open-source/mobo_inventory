@@ -1,17 +1,25 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import '../../../core/theme/app_theme.dart';
 import '../models/move_history_item.dart';
 import 'move_history_list_tile.dart';
 import '../../../core/routing/app_routes.dart';
 
 class MoveHistoryGroupTile extends StatelessWidget {
   final String groupKey;
+
+  /// The group's move lines on the server, not just those loaded.
   final int count;
-  final List<MoveHistoryItem> items;
+
+  /// The group's loaded move lines; null while they load.
+  final List<MoveHistoryItem>? items;
   final bool isDark;
   final ThemeData theme;
   final bool isExpanded;
   final VoidCallback onToggle;
+
+  /// Shown under the move lines, e.g. "Load more".
+  final Widget? footer;
 
   const MoveHistoryGroupTile({
     super.key,
@@ -22,6 +30,7 @@ class MoveHistoryGroupTile extends StatelessWidget {
     required this.theme,
     required this.isExpanded,
     required this.onToggle,
+    this.footer,
   });
 
   @override
@@ -29,23 +38,22 @@ class MoveHistoryGroupTile extends StatelessWidget {
     return Container(
       decoration: BoxDecoration(
         color: isDark ? Colors.grey[900] : Colors.white,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(AppRadius.lg),
         border: Border.all(
           color: isDark
-              ? Colors.white.withOpacity(0.08)
-              : Colors.black.withOpacity(0.06),
+              ? Colors.white.withValues(alpha: 0.08)
+              : Colors.black.withValues(alpha: 0.06),
         ),
         boxShadow: [
-          if (!isDark)
-            BoxShadow(
-              blurRadius: 16,
-              spreadRadius: 2,
-              offset: const Offset(0, 6),
-              color: Colors.black.withOpacity(0.08),
-            ),
+          BoxShadow(
+            blurRadius: 16,
+            spreadRadius: 2,
+            offset: const Offset(0, 6),
+            color: Colors.black.withValues(alpha: 0.08),
+          ),
         ],
       ),
-      margin: const EdgeInsets.only(bottom: 12),
+      margin: const EdgeInsets.only(bottom: 8),
       child: Column(
         children: [
           Material(
@@ -54,63 +62,76 @@ class MoveHistoryGroupTile extends StatelessWidget {
             child: InkWell(
               onTap: onToggle,
               borderRadius: BorderRadius.circular(12),
+              splashColor: Colors.transparent,
+              highlightColor: Colors.transparent,
               child: Padding(
                 padding: const EdgeInsets.all(16),
                 child: Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(
-                      color: theme.primaryColor.withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(8),
+                  children: [
+                    Container(
+                      width: 46,
+                      height: 46,
+                      decoration: BoxDecoration(
+                        color: theme.primaryColor.withValues(alpha: 0.1),
+                        shape: BoxShape.circle,
+                      ),
+                      child: Icon(
+                        Icons.history,
+                        color: theme.primaryColor,
+                        size: 22,
+                      ),
                     ),
-                    child: Icon(
-                      Icons.history,
-                      color: theme.primaryColor,
-                      size: 20,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          groupKey,
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600,
-                            color: isDark ? Colors.white : Colors.black87,
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            groupKey,
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                              color: isDark ? Colors.white : Colors.black,
+                            ),
                           ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          '$count ${count == 1 ? 'move' : 'moves'}',
-                          style: TextStyle(
-                            fontSize: 13,
-                            color: isDark ? Colors.grey[400] : Colors.grey[600],
+                          const SizedBox(height: 4),
+                          Text(
+                            '$count ${count == 1 ? 'move' : 'moves'}',
+                            style: TextStyle(
+                              fontSize: 14,
+                              color: isDark
+                                  ? Colors.grey[400]
+                                  : Colors.grey[600],
+                            ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
-                  ),
-                  Icon(
-                    isExpanded ? Icons.expand_less : Icons.expand_more,
-                    color: isDark ? Colors.grey[400] : Colors.grey[600],
-                  ),
-                ],
+                    Icon(
+                      isExpanded
+                          ? Icons.keyboard_arrow_up
+                          : Icons.keyboard_arrow_down,
+                      color: isDark ? Colors.white70 : Colors.black87,
+                    ),
+                  ],
                 ),
               ),
             ),
           ),
           if (isExpanded) ...[
             const Divider(height: 1),
-            Padding(
-              padding: const EdgeInsets.only(left: 16, right: 16, bottom: 16),
-              child: Column(
-                children: items
-                    .map(
-                      (item) => GestureDetector(
+            if (items == null)
+              Padding(
+                padding: const EdgeInsets.all(24),
+                child: CircularProgressIndicator(color: theme.primaryColor),
+              )
+            else
+              Padding(
+                padding: const EdgeInsets.only(left: 16, right: 16, bottom: 16),
+                child: Column(
+                  children: [
+                    for (final item in items!)
+                      GestureDetector(
                         onTap: () {
                           context.pushNamed(
                             AppRoutes.moveHistoryDetail,
@@ -119,10 +140,10 @@ class MoveHistoryGroupTile extends StatelessWidget {
                         },
                         child: MoveHistoryListTile(item: item, isDark: isDark),
                       ),
-                    )
-                    .toList(),
+                    if (footer != null) footer!,
+                  ],
+                ),
               ),
-            ),
           ],
         ],
       ),

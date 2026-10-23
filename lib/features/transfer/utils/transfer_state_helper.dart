@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/services/access_rights_service.dart';
+import '../../../core/theme/app_theme.dart';
+
 /// Helper class for managing and formatting transfer states and their visual representations.
 class TransferStateHelper {
   static String getStateLabel(String? state) {
@@ -23,25 +26,7 @@ class TransferStateHelper {
     }
   }
 
-  static Color getStateColor(String? state) {
-    if (state == null) return Colors.grey;
-
-    switch (state) {
-      case 'draft':
-        return Colors.grey;
-      case 'waiting':
-      case 'confirmed':
-        return Colors.orange;
-      case 'assigned':
-        return Colors.blue;
-      case 'done':
-        return Colors.green;
-      case 'cancel':
-        return Colors.red;
-      default:
-        return Colors.grey;
-    }
-  }
+  static Color getStateColor(String? state) => StatusColors.forState(state);
 
   static bool canEdit(String? state) {
     return state != 'done' && state != 'cancel';
@@ -58,4 +43,25 @@ class TransferStateHelper {
   static bool canCancel(String? state) {
     return state != 'done' && state != 'cancel';
   }
+
+  /// Whether the user's Odoo access rights allow creating a transfer: the
+  /// picking and its moves.
+  static bool hasCreateRights(AccessRightsService access) =>
+      access.can('stock.picking', 'create') &&
+      access.can('stock.move', 'create');
+
+  /// Whether the user's Odoo access rights allow editing a transfer. Saving
+  /// rewrites the picking and deletes and recreates its moves.
+  static bool hasEditRights(AccessRightsService access) =>
+      access.can('stock.picking', 'write') &&
+      access.can('stock.move', 'unlink') &&
+      access.can('stock.move', 'create');
+
+  /// Whether the user may cancel a transfer or mark it as to do.
+  static bool hasWriteRights(AccessRightsService access) =>
+      access.can('stock.picking', 'write');
+
+  /// Whether the user may validate a transfer, which also writes its moves.
+  static bool hasValidateRights(AccessRightsService access) =>
+      access.can('stock.picking', 'write') && access.can('stock.move', 'write');
 }

@@ -1,13 +1,16 @@
-
-
 import 'package:flutter/material.dart';
 
- const Color primaryColor = Color(0xFFC03355);
+import '../theme/app_theme.dart';
 
-final whiteColor = Colors.white;
+// Legacy top-level aliases kept for existing imports. The palette itself lives
+// in [AppTheme] (`lib/core/theme/app_theme.dart`).
 
-final backgroundColor = const Color(0xFFF5F5F5);
+const Color primaryColor = AppTheme.primaryColor;
 
-final secondaryColor = const Color(0xFF9EA700);
+const Color whiteColor = AppTheme.white;
 
-final blackColor =  Colors.black87;
+const Color backgroundColor = AppTheme.background;
+
+const Color secondaryColor = AppTheme.secondaryColor;
+
+const Color blackColor = AppTheme.textPrimary;

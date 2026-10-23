@@ -27,11 +27,11 @@ class UniversalErrorWidget extends StatelessWidget {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             SizedBox(
-              width: 200,
-              height: 200,
+              width: 120,
+              height: 120,
               child: _buildAnimation(errorInfo),
             ),
-            const SizedBox(height: 24),
+            const SizedBox(height: 32),
 
             Text(
               errorInfo.title,
@@ -46,12 +46,19 @@ class UniversalErrorWidget extends StatelessWidget {
             Container(
               padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
-                color: errorInfo.color.withOpacity(0.1),
+                color: theme.colorScheme.surface,
                 borderRadius: BorderRadius.circular(16),
                 border: Border.all(
-                  color: errorInfo.color.withOpacity(0.3),
+                  color: errorInfo.color.withValues(alpha: 0.2),
                   width: 1,
                 ),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.05),
+                    blurRadius: 10,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
               ),
               child: Text(
                 errorInfo.message,
@@ -79,7 +86,10 @@ class UniversalErrorWidget extends StatelessWidget {
                         horizontal: 24,
                         vertical: 14,
                       ),
-                      side: BorderSide(color: errorInfo.color),
+                      side: BorderSide(
+                        color: theme.colorScheme.primary,
+                        width: 1.5,
+                      ),
                     ),
                   ),
                 if (onContactSupport != null ||
@@ -145,7 +155,7 @@ class UniversalErrorWidget extends StatelessWidget {
             width: 120,
             height: 120,
             decoration: BoxDecoration(
-              color: errorInfo.color.withOpacity(0.1),
+              color: errorInfo.color.withValues(alpha: 0.1),
               shape: BoxShape.circle,
             ),
             child: Icon(errorInfo.icon, size: 60, color: errorInfo.color),

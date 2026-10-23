@@ -1,3 +1,5 @@
+import '../../../core/utils/odoo_value.dart';
+
 class ManufacturingTransfer {
   final int id;
   final String name;
@@ -30,7 +32,8 @@ class ManufacturingTransfer {
     }
 
     String? uomName;
-    final uom = json['product_uom_id'];
+    // `uom_id` is the Odoo 20 name of mrp.production.product_uom_id.
+    final uom = json['product_uom_id'] ?? json['uom_id'];
     if (uom is List && uom.length > 1) uomName = uom[1]?.toString();
     if (uom is Map) uomName = (uom['display_name'] ?? uom['name'])?.toString();
 
@@ -38,15 +41,14 @@ class ManufacturingTransfer {
       id: json['id'] as int,
       name: (json['name'] ?? '').toString(),
       state: (json['state'] ?? '').toString(),
-      origin: (json['origin'] ?? '').toString(),
+      origin: odooString(json['origin']),
       productName: prodName,
       productQty: (json['product_qty'] ?? json['qty_produced'])?.toDouble(),
       uomName: uomName,
       scheduledDate:
-          (json['date_planned_start'] ??
-                  json['scheduled_date'] ??
-                  json['date_start'])
-              ?.toString(),
+          odooString(json['date_planned_start']) ??
+          odooString(json['scheduled_date']) ??
+          odooString(json['date_start']),
     );
   }
 

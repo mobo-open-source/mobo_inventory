@@ -3,6 +3,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import 'package:hugeicons/hugeicons.dart';
 import '../../../core/routing/app_routes.dart';
+import '../../../core/services/access_rights_service.dart';
+import '../../../core/services/odoo_session_manager.dart';
 
 class LastOpenedItem {
   final String id;
@@ -38,6 +40,22 @@ class LastOpenedItem {
     };
   }
 
+  /// Whether the signed-in user may open this item: its record must be
+  /// readable, and a tab it opens must be shown — the shell sends the user
+  /// straight back to the Dashboard from a hidden one. Fails open like
+  /// [AccessRightsService.can].
+  bool canOpen(AccessRightsService access) {
+    switch (route) {
+      case AppRoutes.inventoryProductDetail:
+        return access.can('product.product', 'read');
+      case AppRoutes.transferDetail:
+        return access.can('stock.picking', 'read');
+      case AppRoutes.replenishment:
+        return access.isBranchVisible(AccessRightsService.replenishmentBranch);
+    }
+    return true;
+  }
+
   static IconData iconFromKey(String key) {
     switch (key) {
       case 'inventory_2_outlined':
@@ -66,7 +84,9 @@ class LastOpenedItem {
 }
 
 class LastOpenedProvider extends ChangeNotifier {
-  static const String _storageKey = 'last_opened_items_inv';
+  /// The pre-scoping key, shared by every account. Its items cannot be
+  /// attributed to any one account, so it is dropped rather than migrated.
+  static const String _legacyStorageKey = 'last_opened_items_inv';
   static const int _maxItems = 10;
 
   List<LastOpenedItem> _items = [];
@@ -79,35 +99,57 @@ class LastOpenedProvider extends ChangeNotifier {
     _loadItems();
   }
 
+  /// Recent items are stored per account (`serverUrl|database|userId`).
+  /// One shared list showed account A's records on account B's dashboard,
+  /// and tapping one opened that record id on the wrong database.
+  Future<String?> _storageKey() async {
+    final session = await OdooSessionManager.getCurrentSession();
+    if (session == null) return null;
+    return '$_legacyStorageKey|${session.serverUrl}|${session.database}|'
+        '${session.userId}';
+  }
+
+  /// Swaps in the recent items of the account now signed in. Called on every
+  /// account change.
+  Future<void> reloadForCurrentAccount() async {
+    _items = [];
+    notifyListeners();
+    await _loadItems();
+  }
+
   Future<void> _loadItems() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final jsonString = prefs.getString(_storageKey);
+      await prefs.remove(_legacyStorageKey);
+
+      final key = await _storageKey();
+      final jsonString = key == null ? null : prefs.getString(key);
 
       if (jsonString != null) {
         final List<dynamic> jsonList = json.decode(jsonString);
         _items = jsonList.map((json) => LastOpenedItem.fromJson(json)).toList();
 
         _items.sort((a, b) => b.lastAccessed.compareTo(a.lastAccessed));
-
-        notifyListeners();
+      } else {
+        _items = [];
       }
+      notifyListeners();
     } catch (e) {
-            _items = [];
+      _items = [];
     }
   }
 
   Future<void> _saveItems() async {
     try {
+      final key = await _storageKey();
+      if (key == null) return;
       final prefs = await SharedPreferences.getInstance();
       final jsonList = _items.map((item) => item.toJson()).toList();
-      await prefs.setString(_storageKey, json.encode(jsonList));
-    } catch (e) {
-          }
+      await prefs.setString(key, json.encode(jsonList));
+    } catch (e) {}
   }
 
   Future<void> addItem(LastOpenedItem item) async {
-
     _items.removeWhere((existingItem) => existingItem.id == item.id);
 
     _items.insert(0, item);

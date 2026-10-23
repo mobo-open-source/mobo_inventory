@@ -1,3 +1,5 @@
+import '../../../core/utils/odoo_value.dart';
+
 /// Model representing a scheduled Odoo activity for the current user.
 class TodayActivity {
   final int id;
@@ -27,8 +29,8 @@ class TodayActivity {
       id: data['id'] as int,
       resModel: (data['res_model'] ?? '').toString(),
       resId: (data['res_id'] ?? 0) as int,
-      summary: (data['summary'] ?? '').toString(),
-      note: (data['note'] ?? '').toString(),
+      summary: odooString(data['summary']),
+      note: odooString(data['note']),
       deadline: parseDate(data['date_deadline']),
     );
   }

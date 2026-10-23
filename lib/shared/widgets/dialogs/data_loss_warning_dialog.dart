@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:hugeicons/hugeicons.dart';
+import '../../../core/theme/app_theme.dart';
 
 /// A high-priority warning dialog alerting the user about potential data loss.
 class DataLossWarningDialog extends StatelessWidget {
@@ -26,9 +27,9 @@ class DataLossWarningDialog extends StatelessWidget {
     final primaryColor = Theme.of(context).primaryColor;
 
     return Dialog(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-      backgroundColor: isDark ? Colors.grey[900] : Colors.white,
-      elevation: 8,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      backgroundColor: isDark ? AppTheme.darkSurface : Colors.white,
+      elevation: 0,
       child: Padding(
         padding: const EdgeInsets.all(24),
         child: Column(
@@ -36,13 +37,13 @@ class DataLossWarningDialog extends StatelessWidget {
           children: [
             Container(
               decoration: BoxDecoration(
-                color: isDark ? primaryColor : primaryColor.withOpacity(0.1),
+                color: StatusColors.orange.withValues(alpha: 0.1),
                 shape: BoxShape.circle,
               ),
               padding: const EdgeInsets.all(16),
-              child: Icon(
+              child: const Icon(
                 HugeIcons.strokeRoundedAlert02,
-                color: isDark ? Colors.white : primaryColor,
+                color: StatusColors.orange,
                 size: 32,
               ),
             ),
@@ -51,8 +52,8 @@ class DataLossWarningDialog extends StatelessWidget {
             Text(
               title,
               style: TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.w600,
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
                 color: isDark ? Colors.white : Colors.black87,
               ),
               textAlign: TextAlign.center,
@@ -73,49 +74,53 @@ class DataLossWarningDialog extends StatelessWidget {
             Row(
               children: [
                 Expanded(
-                  child: TextButton(
-                    onPressed:
-                        onCancel ?? () => Navigator.of(context).pop(false),
-                    style: TextButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        side: BorderSide(
-                          color: isDark ? Colors.grey[600]! : Colors.grey[300]!,
+                  child: SizedBox(
+                    height: 48,
+                    child: OutlinedButton(
+                      onPressed:
+                          onCancel ?? () => Navigator.of(context).pop(false),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: primaryColor,
+                        side: BorderSide(color: primaryColor, width: 1.5),
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
                         ),
                       ),
-                    ),
-                    child: Text(
-                      cancelText,
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w500,
-                        color: isDark ? Colors.grey[300] : Colors.grey[700],
+                      child: Text(
+                        cancelText,
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
                     ),
                   ),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
-                  child: ElevatedButton(
-                    onPressed: () {
-                      Navigator.of(context).pop(true);
-                      onConfirm();
-                    },
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: primaryColor,
-                      foregroundColor: Colors.white,
-                      elevation: 0,
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
+                  child: SizedBox(
+                    height: 48,
+                    child: ElevatedButton(
+                      onPressed: () {
+                        Navigator.of(context).pop(true);
+                        onConfirm();
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: StatusColors.red,
+                        foregroundColor: Colors.white,
+                        elevation: 0,
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
                       ),
-                    ),
-                    child: Text(
-                      confirmText,
-                      style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
+                      child: Text(
+                        confirmText,
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
                     ),
                   ),

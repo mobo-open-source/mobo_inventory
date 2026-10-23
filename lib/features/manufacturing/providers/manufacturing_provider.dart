@@ -6,6 +6,14 @@ import '../services/manufacturing_service.dart';
 class ManufacturingProvider extends ChangeNotifier {
   final ManufacturingService _service = ManufacturingService();
 
+  /// The Status filter the list opens with: Odoo's "To Do", which is also
+  /// what the dashboard's Manufacturing Orders card counts. The user can
+  /// still change or clear it.
+  final List<String> initialStates;
+
+  ManufacturingProvider({this.initialStates = ManufacturingService.toDoStates})
+    : _states = List<String>.of(initialStates);
+
   bool _isLoading = false;
   String? _error;
   List<ManufacturingTransfer> _items = [];
@@ -14,7 +22,7 @@ class ManufacturingProvider extends ChangeNotifier {
   final int _pageSize = 20;
 
   String _searchQuery = '';
-  List<String> _states = [];
+  List<String> _states;
   DateTime? _startDate;
   DateTime? _endDate;
   String? _selectedGroupBy;
@@ -48,6 +56,18 @@ class ManufacturingProvider extends ChangeNotifier {
   Map<String, int> get groupSummary => _groupSummary;
   Map<String, List<ManufacturingTransfer>> get loadedGroups => _loadedGroups;
 
+  bool _isInitialStates(List<String> states) =>
+      states.length == initialStates.length &&
+      states.toSet().containsAll(initialStates);
+
+  /// The offline cache holds only the list's default view: no search or
+  /// dates, Status filter as opened.
+  bool get _isDefaultView =>
+      _searchQuery.isEmpty &&
+      _startDate == null &&
+      _endDate == null &&
+      _isInitialStates(_states);
+
   Future<void> loadCachedManufacturing() async {
     try {
       final cached = await _service.loadCachedManufacturing();
@@ -57,8 +77,7 @@ class ManufacturingProvider extends ChangeNotifier {
         _isLoading = false;
         notifyListeners();
       }
-    } catch (e) {
-          }
+    } catch (e) {}
   }
 
   Future<void> fetchProductions({
@@ -78,8 +97,8 @@ class ManufacturingProvider extends ChangeNotifier {
 
     if (!forceRefresh &&
         _items.isEmpty &&
-        (searchQuery == null || searchQuery.isEmpty) &&
-        (states == null || states.isEmpty) &&
+        (searchQuery ?? _searchQuery).isEmpty &&
+        _isInitialStates(states ?? _states) &&
         startDate == null &&
         endDate == null) {
       await loadCachedManufacturing();
@@ -116,10 +135,7 @@ class ManufacturingProvider extends ChangeNotifier {
       _items = items;
       _totalCount = count;
 
-      if (_searchQuery.isEmpty &&
-          _states.isEmpty &&
-          _startDate == null &&
-          _endDate == null) {
+      if (_isDefaultView) {
         await _service.cacheManufacturing(items);
       }
     } catch (e) {
@@ -208,10 +224,7 @@ class ManufacturingProvider extends ChangeNotifier {
       _groupSummary = summary;
       _loadedGroups.clear();
 
-      if (_searchQuery.isEmpty &&
-          _states.isEmpty &&
-          _startDate == null &&
-          _endDate == null) {
+      if (_isDefaultView) {
         await _service.cacheGroupSummary(_selectedGroupBy!, summary);
       }
 
@@ -253,12 +266,12 @@ class ManufacturingProvider extends ChangeNotifier {
     _totalCount = 0;
     _currentPage = 0;
     _searchQuery = '';
-    _states = [];
+    _states = List<String>.of(initialStates);
     _startDate = null;
     _endDate = null;
     _selectedGroupBy = null;
     _groupSummary.clear();
     _loadedGroups.clear();
     notifyListeners();
-      }
+  }
 }

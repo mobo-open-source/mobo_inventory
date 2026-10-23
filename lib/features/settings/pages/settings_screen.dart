@@ -1,23 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:hugeicons/hugeicons.dart';
 import 'package:provider/provider.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import '../providers/settings_provider.dart';
+import '../../../core/theme/app_theme.dart';
 import '../../../core/theme/theme_provider.dart';
 import '../../../core/services/biometric_service.dart';
 import '../../../shared/widgets/section_card.dart';
 import '../widgets/switch_tile.dart';
 import '../widgets/odoo_dropdown_tile.dart';
 import '../../../shared/widgets/action_tile.dart';
-import '../../../core/services/odoo_session_manager.dart';
-import '../../../core/services/biometric_context_service.dart';
 import '../../../shared/widgets/snackbars/custom_snackbar.dart';
 import 'package:url_launcher/url_launcher.dart';
-import '../../../shared/widgets/loaders/loading_widget.dart';
-import '../../../shared/widgets/dialogs/common_dialog.dart';
-import 'package:go_router/go_router.dart';
-import '../../../core/routing/app_router.dart';
-import '../../../core/routing/app_routes.dart';
 
 import '../../dashboard/providers/dashboard_provider.dart';
 import '../../inventory/providers/inventory_product_provider.dart';
@@ -127,12 +120,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
       context: context,
       barrierDismissible: true,
       builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        backgroundColor: isDark ? Colors.grey[900] : Colors.white,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppRadius.lg),
+        ),
+        backgroundColor: isDark ? AppTheme.darkSurface : Colors.white,
         title: Text(
           hasDataToClear ? 'Clear Cache' : 'Nothing to Clear',
           style: TextStyle(
-            fontWeight: FontWeight.w700,
+            fontSize: 18,
+            fontWeight: FontWeight.bold,
             color: isDark ? Colors.white : Colors.black87,
           ),
         ),
@@ -142,29 +138,53 @@ class _SettingsScreenState extends State<SettingsScreen> {
               : 'No cached data to clear right now.',
           style: TextStyle(color: isDark ? Colors.grey[300] : Colors.grey[700]),
         ),
+        actionsPadding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
         actions: [
           if (hasDataToClear)
             Row(
-              mainAxisAlignment: MainAxisAlignment.end,
               children: [
-                TextButton(
-                  onPressed: () => Navigator.of(ctx).pop(false),
-                  child: const Text('Cancel'),
-                ),
-                const SizedBox(width: 8),
-                ElevatedButton(
-                  onPressed: () => Navigator.of(ctx).pop(true),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.orange[700],
+                Expanded(
+                  child: SizedBox(
+                    height: 48,
+                    child: OutlinedButton(
+                      onPressed: () => Navigator.of(ctx).pop(false),
+                      child: const Text('Cancel'),
+                    ),
                   ),
-                  child: const Text('Clear Cache'),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: SizedBox(
+                    height: 48,
+                    child: ElevatedButton(
+                      onPressed: () => Navigator.of(ctx).pop(true),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: StatusColors.orange,
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                      ),
+                      child: const Text(
+                        'Clear Cache',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ),
                 ),
               ],
             )
           else
-            ElevatedButton(
-              onPressed: () => Navigator.of(ctx).pop(false),
-              child: const Text('OK'),
+            SizedBox(
+              width: double.infinity,
+              height: 48,
+              child: ElevatedButton(
+                onPressed: () => Navigator.of(ctx).pop(false),
+                child: const Text(
+                  'OK',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                ),
+              ),
             ),
         ],
       ),
@@ -216,232 +236,126 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
-  Future<void> _performLogout(BuildContext context) async {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) {
-        final isDark = Theme.of(context).brightness == Brightness.dark;
-        return PopScope(
-          canPop: false,
-          child: Dialog(
-            backgroundColor: isDark ? Colors.grey[900] : Colors.white,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(20),
-            ),
-            elevation: 8,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 32),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Container(
-                    decoration: BoxDecoration(
-                      color: Theme.of(
-                        context,
-                      ).colorScheme.primary.withOpacity(0.08),
-                      shape: BoxShape.circle,
-                    ),
-                    padding: const EdgeInsets.all(16),
-                    child: LoadingWidget(
-                      color: isDark
-                          ? Colors.white
-                          : Theme.of(context).colorScheme.primary,
-                      size: 50,
-                      variant: LoadingVariant.fourRotatingDots,
-                    ),
-                  ),
-                  const SizedBox(height: 24),
-                  Text(
-                    'Logging out...',
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w600,
-                      color: isDark ? Colors.white : Colors.black87,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Please wait while we process your request.',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontSize: 14,
-                      color: isDark ? Colors.grey[300] : Colors.grey[700],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        );
-      },
-    );
-
-    await Future.delayed(const Duration(milliseconds: 500));
-
-    try {
-      final biometricContext = BiometricContextService();
-      biometricContext.startAccountOperation('logout');
-
-      await OdooSessionManager.logout();
-
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.clear();
-
-      await Future.delayed(const Duration(milliseconds: 100));
-
-      if (context.mounted) {
-        Navigator.of(context).pop();
-        context.goNamed(AppRoutes.app);
-
-        Future.delayed(const Duration(milliseconds: 300), () {
-          final rootContext = AppRouter.rootNavigatorKey.currentContext;
-          if (rootContext != null && rootContext.mounted) {
-            CustomSnackbar.showSuccess(rootContext, 'Logged out successfully');
-          }
-        });
-      }
-    } catch (e) {
-      if (context.mounted) {
-        Navigator.of(context).pop();
-        CustomSnackbar.showError(context, 'Logout failed: $e');
-      }
-    }
-  }
-
-  Future<void> _showLogoutDialog(BuildContext context) async {
-    final confirmed = await CommonDialog.confirm(
-      context,
-      title: 'Confirm Logout',
-      message: 'Are you sure you want to log out? Your session will be ended.',
-      confirmText: 'Log Out',
-      cancelText: 'Cancel',
-      destructive: true,
-      icon: HugeIcons.strokeRoundedLogout01,
-    );
-
-    if (confirmed == true && context.mounted) {
-      await _performLogout(context);
-    }
-  }
-
   Widget _buildAboutContent(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final textPrimary = isDark ? Colors.white : Colors.black87;
     final textSecondary = isDark ? Colors.grey[400] : Colors.grey[600];
 
-    return Padding(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        ActionTile(
+          title: 'Visit Website',
+          subtitle: 'www.cybrosys.com',
+          icon: HugeIcons.strokeRoundedGlobe02,
+          onTap: () => _launchUrlSmart(
+            'https://www.cybrosys.com/',
+            title: 'Our Website',
+          ),
+        ),
+        ActionTile(
+          title: 'Contact Us',
+          subtitle: 'info@cybrosys.com',
+          icon: HugeIcons.strokeRoundedMail01,
+          onTap: () => _launchUrlSmart('mailto:info@cybrosys.com'),
+        ),
+
+        if (Theme.of(context).platform == TargetPlatform.android)
           ActionTile(
-            title: 'Visit Website',
-            subtitle: 'www.cybrosys.com',
-            icon: HugeIcons.strokeRoundedGlobe02,
+            title: 'More Apps',
+            subtitle: 'View our other apps on Play Store',
+            icon: HugeIcons.strokeRoundedPlayStore,
             onTap: () => _launchUrlSmart(
-              'https://www.cybrosys.com/',
-              title: 'Our Website',
+              'https://play.google.com/store/apps/dev?id=7163004064816759344&pli=1',
+              title: 'Play Store',
             ),
           ),
+        if (Theme.of(context).platform == TargetPlatform.iOS)
           ActionTile(
-            title: 'Contact Us',
-            subtitle: 'info@cybrosys.com',
-            icon: HugeIcons.strokeRoundedMail01,
-            onTap: () => _launchUrlSmart('mailto:info@cybrosys.com'),
-          ),
-
-          if (Theme.of(context).platform == TargetPlatform.android)
-            ActionTile(
-              title: 'More Apps',
-              subtitle: 'View our other apps on Play Store',
-              icon: HugeIcons.strokeRoundedPlayStore,
-              onTap: () => _launchUrlSmart(
-                'https://play.google.com/store/apps/dev?id=7163004064816759344&pli=1',
-                title: 'Play Store',
-              ),
-            ),
-          if (Theme.of(context).platform == TargetPlatform.iOS)
-            ActionTile(
-              title: 'More Apps',
-              subtitle: 'View our other apps on App Store',
-              icon: HugeIcons.strokeRoundedAppStore,
-              onTap: () => _launchUrlSmart(
-                'https://apps.apple.com/in/developer/cybrosys-technologies/id1805306445',
-                title: 'App Store',
-              ),
-            ),
-
-          const SizedBox(height: 16),
-          Divider(color: isDark ? Colors.grey[800] : Colors.grey[200]),
-          const SizedBox(height: 16),
-
-          Center(
-            child: Text(
-              'Follow Us',
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w500,
-                color: textPrimary,
-              ),
+            title: 'More Apps',
+            subtitle: 'View our other apps on App Store',
+            icon: HugeIcons.strokeRoundedAppStore,
+            onTap: () => _launchUrlSmart(
+              'https://apps.apple.com/in/developer/cybrosys-technologies/id1805306445',
+              title: 'App Store',
             ),
           ),
-          const SizedBox(height: 12),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+          child: Column(
             children: [
-              _buildSocialButton(
-                context,
-                'assets/images/social/facebook.png',
-                const Color(0xFF1877F2),
-                'Facebook',
-                () => _launchUrlSmart(
-                  'https://www.facebook.com/cybrosystechnologies',
-                  title: 'Facebook',
+              Divider(color: isDark ? Colors.grey[800] : Colors.grey[200]),
+              const SizedBox(height: 16),
+
+              Center(
+                child: Text(
+                  'Follow Us',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w500,
+                    color: textPrimary,
+                  ),
                 ),
               ),
-              _buildSocialButton(
-                context,
-                'assets/images/social/linkedin.png',
-                const Color(0xFF0077B5),
-                'LinkedIn',
-                () => _launchUrlSmart(
-                  'https://www.linkedin.com/company/cybrosys/',
-                  title: 'LinkedIn',
-                ),
+              const SizedBox(height: 12),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: [
+                  _buildSocialButton(
+                    context,
+                    'assets/images/social/facebook.png',
+                    const Color(0xFF1877F2),
+                    'Facebook',
+                    () => _launchUrlSmart(
+                      'https://www.facebook.com/cybrosystechnologies',
+                      title: 'Facebook',
+                    ),
+                  ),
+                  _buildSocialButton(
+                    context,
+                    'assets/images/social/linkedin.png',
+                    const Color(0xFF0077B5),
+                    'LinkedIn',
+                    () => _launchUrlSmart(
+                      'https://www.linkedin.com/company/cybrosys/',
+                      title: 'LinkedIn',
+                    ),
+                  ),
+                  _buildSocialButton(
+                    context,
+                    'assets/images/social/instagram.png',
+                    const Color(0xFFE4405F),
+                    'Instagram',
+                    () => _launchUrlSmart(
+                      'https://www.instagram.com/cybrosystech/',
+                      title: 'Instagram',
+                    ),
+                  ),
+                  _buildSocialButton(
+                    context,
+                    'assets/images/social/youtube.png',
+                    const Color(0xFFFF0000),
+                    'YouTube',
+                    () => _launchUrlSmart(
+                      'https://www.youtube.com/channel/UCKjWLm7iCyOYINVspCSanjg',
+                      title: 'YouTube',
+                    ),
+                  ),
+                ],
               ),
-              _buildSocialButton(
-                context,
-                'assets/images/social/instagram.png',
-                const Color(0xFFE4405F),
-                'Instagram',
-                () => _launchUrlSmart(
-                  'https://www.instagram.com/cybrosystech/',
-                  title: 'Instagram',
-                ),
-              ),
-              _buildSocialButton(
-                context,
-                'assets/images/social/youtube.png',
-                const Color(0xFFFF0000),
-                'YouTube',
-                () => _launchUrlSmart(
-                  'https://www.youtube.com/channel/UCKjWLm7iCyOYINVspCSanjg',
-                  title: 'YouTube',
+
+              const SizedBox(height: 24),
+              Center(
+                child: Text(
+                  '© ${DateTime.now().year} Cybrosys Technologies',
+                  style: TextStyle(fontSize: 12, color: textSecondary),
                 ),
               ),
             ],
           ),
-
-          const SizedBox(height: 24),
-          Center(
-            child: Text(
-              '© ${DateTime.now().year} Cybrosys Technologies',
-              style: TextStyle(fontSize: 12, color: textSecondary),
-            ),
-          ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 
@@ -491,7 +405,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
       }
     } catch (e) {
       if (!mounted) return;
-      CustomSnackbar.showError(context, 'Could not open link. ${e.toString()}');
+      CustomSnackbar.showError(
+        context,
+        'Could not open link. Please try again.',
+      );
     }
   }
 
@@ -643,7 +560,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       );
                     }
                   },
-                  icon: const Icon(Icons.refresh, size: 18),
+                  icon: Icon(
+                    Icons.refresh,
+                    size: 18,
+                    color: Theme.of(context).brightness == Brightness.dark
+                        ? Colors.white
+                        : Colors.black,
+                  ),
                 ),
                 children: [
                   OdooDropdownTile(

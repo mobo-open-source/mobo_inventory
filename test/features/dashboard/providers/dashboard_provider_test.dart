@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:mobo_inv_app/features/dashboard/providers/dashboard_provider.dart';
@@ -139,6 +141,8 @@ void main() {
           minQty: 10,
           maxQty: 20,
           onHand: 5,
+          forecast: 5,
+          toOrder: 15,
         ),
       ];
       when(
@@ -149,6 +153,75 @@ void main() {
 
       expect(provider.isLoadingReplenishment, false);
       expect(provider.replenishmentNeeds, needs);
+    });
+
+    test('a forced reload supersedes a load still running', () async {
+      DashboardStats statsWith(int warehouses) => DashboardStats(
+        totalWarehouses: warehouses,
+        totalLocations: 0,
+        deliveryOrders: 0,
+        readyToDeliver: 0,
+        receipts: 0,
+        readyToReceive: 0,
+        internalTransfers: 0,
+        readyToTransfer: 0,
+        manufacturingOrders: 0,
+        readyToProduce: 0,
+        negativeQuants: 0,
+      );
+      // The first load went out under the old company scope and answers
+      // last; the reload for the new scope must win.
+      final oldScope = Completer<DashboardStats>();
+      final newScope = Completer<DashboardStats>();
+      final answers = [oldScope, newScope];
+      when(
+        () => mockService.fetchDashboardStats(),
+      ).thenAnswer((_) => answers.removeAt(0).future);
+
+      final first = provider.fetchStats();
+      // A plain call while loading is still ignored.
+      await provider.fetchStats();
+      expect(answers, hasLength(1));
+
+      final reload = provider.fetchStats(forceRefresh: true);
+      newScope.complete(statsWith(1));
+      await reload;
+      expect(provider.stats.totalWarehouses, 1);
+      expect(provider.isLoading, false);
+
+      oldScope.complete(statsWith(3));
+      await first;
+      expect(provider.stats.totalWarehouses, 1);
+      expect(provider.isLoading, false);
+    });
+
+    test('resetState drops a load started for the previous account', () async {
+      final pending = Completer<List<RecentActivity>>();
+      when(
+        () => mockService.fetchRecentActivities(limit: any(named: 'limit')),
+      ).thenAnswer((_) => pending.future);
+
+      final load = provider.fetchRecentActivities();
+      expect(provider.isLoadingRecent, true);
+      provider.resetState();
+      expect(provider.isLoadingRecent, false);
+
+      pending.complete([
+        RecentActivity(
+          id: 1,
+          name: 'WH/OUT/001',
+          type: 'outgoing',
+          model: 'stock.picking',
+          state: 'done',
+          date: DateTime.now(),
+        ),
+      ]);
+      await load;
+      expect(provider.recentActivities, isEmpty);
+    });
+
+    test('showManufacturing defaults to shown', () {
+      expect(DashboardStats.empty().showManufacturing, true);
     });
 
     test('resetState clears all data', () {

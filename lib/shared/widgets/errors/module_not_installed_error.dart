@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../core/theme/app_theme.dart';
 
 class ModuleNotInstalledError extends StatelessWidget {
   final String moduleName;
@@ -35,13 +36,13 @@ class ModuleNotInstalledError extends StatelessWidget {
                     width: 120,
                     height: 120,
                     decoration: BoxDecoration(
-                      color: Colors.orange.withOpacity(0.1),
+                      color: StatusColors.orange.withValues(alpha: 0.1),
                       shape: BoxShape.circle,
                     ),
                     child: Icon(
                       Icons.extension_off_rounded,
                       size: 60,
-                      color: Colors.orange.shade700,
+                      color: StatusColors.orange,
                     ),
                   ),
                 );
@@ -62,10 +63,10 @@ class ModuleNotInstalledError extends StatelessWidget {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               decoration: BoxDecoration(
-                color: Colors.orange.withOpacity(0.15),
+                color: StatusColors.orange.withValues(alpha: 0.15),
                 borderRadius: BorderRadius.circular(20),
                 border: Border.all(
-                  color: Colors.orange.withOpacity(0.3),
+                  color: StatusColors.orange.withValues(alpha: 0.3),
                   width: 1,
                 ),
               ),
@@ -75,13 +76,13 @@ class ModuleNotInstalledError extends StatelessWidget {
                   Icon(
                     Icons.inventory_2_outlined,
                     size: 18,
-                    color: Colors.orange.shade700,
+                    color: StatusColors.orange,
                   ),
                   const SizedBox(width: 8),
                   Text(
                     moduleName,
                     style: theme.textTheme.titleSmall?.copyWith(
-                      color: Colors.orange.shade700,
+                      color: StatusColors.orange,
                       fontWeight: FontWeight.w600,
                     ),
                   ),
@@ -96,7 +97,7 @@ class ModuleNotInstalledError extends StatelessWidget {
                 color: theme.colorScheme.surface,
                 borderRadius: BorderRadius.circular(16),
                 border: Border.all(
-                  color: Colors.orange.withOpacity(0.2),
+                  color: StatusColors.orange.withValues(alpha: 0.2),
                   width: 1,
                 ),
                 boxShadow: [
@@ -122,7 +123,7 @@ class ModuleNotInstalledError extends StatelessWidget {
                   Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: Colors.blue.withOpacity(0.1),
+                      color: StatusColors.blue.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: Row(
@@ -130,14 +131,14 @@ class ModuleNotInstalledError extends StatelessWidget {
                         Icon(
                           Icons.info_outline,
                           size: 20,
-                          color: Colors.blue.shade700,
+                          color: StatusColors.blue,
                         ),
                         const SizedBox(width: 12),
                         Expanded(
                           child: Text(
                             'This feature requires the module to be installed by your administrator.',
                             style: theme.textTheme.bodySmall?.copyWith(
-                              color: Colors.blue.shade700,
+                              color: StatusColors.blue,
                               height: 1.4,
                             ),
                           ),
@@ -165,7 +166,10 @@ class ModuleNotInstalledError extends StatelessWidget {
                         horizontal: 24,
                         vertical: 14,
                       ),
-                      side: BorderSide(color: theme.colorScheme.primary),
+                      side: BorderSide(
+                        color: theme.colorScheme.primary,
+                        width: 1.5,
+                      ),
                     ),
                   ),
                 if (onContactSupport != null)
@@ -178,7 +182,7 @@ class ModuleNotInstalledError extends StatelessWidget {
                         horizontal: 24,
                         vertical: 14,
                       ),
-                      backgroundColor: Colors.orange.shade700,
+                      backgroundColor: StatusColors.orange,
                       foregroundColor: Colors.white,
                     ),
                   ),

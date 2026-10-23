@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:hugeicons/hugeicons.dart';
+import '../../../core/theme/app_theme.dart';
 import '../models/transfer_model.dart';
 import '../providers/transfer_provider.dart';
 import '../utils/transfer_state_helper.dart';
@@ -45,26 +46,19 @@ class _GroupTileState extends State<_GroupTile> {
 
   @override
   Widget build(BuildContext context) {
+    // §12 grouped section header shell.
     return Container(
       decoration: BoxDecoration(
-        color: widget.isDark ? Colors.grey[900] : Colors.white,
-        borderRadius: BorderRadius.circular(12),
+        color: widget.isDark ? Colors.grey[850] : Colors.white,
+        borderRadius: BorderRadius.circular(AppRadius.lg),
         border: Border.all(
           color: widget.isDark
-              ? Colors.white.withOpacity(0.08)
-              : Colors.black.withOpacity(0.06),
+              ? Colors.white.withValues(alpha: 0.08)
+              : Colors.black.withValues(alpha: 0.06),
         ),
-        boxShadow: [
-          if (!widget.isDark)
-            BoxShadow(
-              blurRadius: 16,
-              spreadRadius: 2,
-              offset: const Offset(0, 6),
-              color: Colors.black.withOpacity(0.08),
-            )
-        ],
+        boxShadow: AppShadows.card,
       ),
-      margin: const EdgeInsets.only(bottom: 12),
+      margin: const EdgeInsets.only(bottom: 8),
       child: Column(
         children: [
           InkWell(
@@ -77,7 +71,9 @@ class _GroupTileState extends State<_GroupTile> {
                 await widget.provider.loadGroupTransfers(widget.groupKey);
               }
             },
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(AppRadius.md),
+            splashColor: Colors.transparent,
+            highlightColor: Colors.transparent,
             child: Padding(
               padding: const EdgeInsets.all(16),
               child: Row(
@@ -85,7 +81,7 @@ class _GroupTileState extends State<_GroupTile> {
                   Container(
                     padding: const EdgeInsets.all(10),
                     decoration: BoxDecoration(
-                      color: widget.theme.primaryColor.withOpacity(0.1),
+                      color: widget.theme.primaryColor.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: Icon(
@@ -102,16 +98,16 @@ class _GroupTileState extends State<_GroupTile> {
                         Text(
                           widget.groupKey,
                           style: TextStyle(
-                            fontSize: 15,
+                            fontSize: 14,
                             fontWeight: FontWeight.w600,
-                            color: widget.isDark ? Colors.white : Colors.black87,
+                            color: widget.isDark ? Colors.white : Colors.black,
                           ),
                         ),
                         const SizedBox(height: 4),
                         Text(
                           '${widget.count} transfer${widget.count != 1 ? 's' : ''}',
                           style: TextStyle(
-                            fontSize: 13,
+                            fontSize: 14,
                             color: widget.isDark
                                 ? Colors.grey[400]
                                 : Colors.grey[600],
@@ -121,8 +117,10 @@ class _GroupTileState extends State<_GroupTile> {
                     ),
                   ),
                   Icon(
-                    _isExpanded ? Icons.expand_less : Icons.expand_more,
-                    color: widget.isDark ? Colors.grey[400] : Colors.grey[600],
+                    _isExpanded
+                        ? Icons.keyboard_arrow_up
+                        : Icons.keyboard_arrow_down,
+                    color: widget.isDark ? Colors.white70 : Colors.black87,
                   ),
                 ],
               ),
@@ -144,9 +142,7 @@ class _GroupTileState extends State<_GroupTile> {
                   return _TransferListTile(
                     transfer: transfer,
                     isDark: widget.isDark,
-                    onTap: () {
-
-                    },
+                    onTap: () {},
                     isInGroup: true,
                   );
                 }
@@ -210,21 +206,10 @@ class _TransferListTile extends StatelessWidget {
                     ),
                   ),
                 ),
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: _getStateColor().withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Text(
-                    _getStateLabel(),
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                      color: _getStateColor(),
-                    ),
-                  ),
+                StatusColors.buildStatusBadge(
+                  _getStateLabel(),
+                  _getStateColor(),
+                  isDark: isDark,
                 ),
               ],
             ),

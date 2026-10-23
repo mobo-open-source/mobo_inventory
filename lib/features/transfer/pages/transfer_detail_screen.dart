@@ -3,15 +3,22 @@ import 'package:go_router/go_router.dart';
 import 'package:hugeicons/hugeicons.dart';
 import 'package:mobo_inv_app/core/routing/app_routes.dart';
 import 'package:provider/provider.dart';
+import '../../../core/const/app_colors.dart';
+import '../../../core/exceptions/app_exceptions.dart';
+import '../../../core/services/access_rights_service.dart';
+import '../../replenishment/utils/replenishment_error.dart';
+import '../../../core/theme/app_theme.dart';
 import '../providers/transfer_provider.dart';
 import '../models/transfer_model.dart';
 import '../utils/transfer_state_helper.dart';
 import '../../../shared/widgets/dialogs/loading_dialog.dart';
-import '../../../shared/widgets/badges/status_badge.dart';
+import '../../../shared/widgets/cards/status_info_card.dart';
 import '../../../shared/widgets/snackbars/custom_snackbar.dart';
 import '../../../shared/widgets/dialogs/common_dialog.dart';
 import '../../dashboard/providers/last_opened_provider.dart';
 import '../../../shared/widgets/loaders/shimmer_skeleton.dart';
+import '../../../core/services/review_service.dart';
+import '../../../main.dart';
 
 /// Screen displaying the full details of a specific stock transfer, including line items and actions.
 class TransferDetailScreen extends StatefulWidget {
@@ -88,7 +95,7 @@ class _TransferDetailScreenState extends State<TransferDetailScreen> {
       'Mark as Todo',
       'This will confirm the transfer and mark it as ready to process. Continue?',
       'Mark as Todo',
-      Colors.blue,
+      StatusColors.blue,
     );
 
     if (confirm == true && mounted) {
@@ -148,7 +155,7 @@ class _TransferDetailScreenState extends State<TransferDetailScreen> {
       'Validate Transfer',
       'This will process and complete the transfer. This action cannot be undone. Continue?',
       'Validate',
-      Colors.green,
+      StatusColors.green,
     );
 
     if (confirm == true && mounted) {
@@ -163,23 +170,26 @@ class _TransferDetailScreenState extends State<TransferDetailScreen> {
           LoadingDialog.hide(context);
           _showMessage('Transfer validated successfully');
           await _loadDetails();
+
+          ReviewService().trackSignificantEvent();
+          // Let the success snackbar (a dialog route) dismiss itself before the
+          // rating dialog is pushed, so its timer can't pop the wrong route.
+          Future.delayed(const Duration(milliseconds: 3500), () {
+            final targetContext = navigatorKey.currentContext;
+            if (targetContext != null && targetContext.mounted) {
+              ReviewService().checkAndShowRating(targetContext);
+            }
+          });
         }
       } catch (e) {
         if (mounted) {
           LoadingDialog.hide(context);
 
-          String errorMessage = 'Failed to validate transfer';
-          final errorStr = e.toString();
-
-          if (errorStr.contains('no quantities are reserved')) {
-            errorMessage =
-                'Cannot validate: No quantities reserved. Please check availability first.';
-          } else if (errorStr.contains('message:')) {
-            final match = RegExp(r'message:\s*([^,}]+)').firstMatch(errorStr);
-            if (match != null) {
-              errorMessage = match.group(1)?.trim() ?? errorMessage;
-            }
-          }
+          // Odoo's own UserError text; the top-level JSON-RPC message is only
+          // the generic "Odoo Server Error".
+          final errorMessage = e is AppException
+              ? e.message
+              : ReplenishmentError.from(e).message;
 
           _showMessage(errorMessage, isError: true);
         }
@@ -206,7 +216,7 @@ class _TransferDetailScreenState extends State<TransferDetailScreen> {
       'Cancel Transfer',
       'Are you sure you want to cancel this transfer? This action cannot be undone.',
       'Yes, Cancel',
-      Colors.red,
+      StatusColors.red,
     );
 
     if (confirm == true && mounted) {
@@ -253,7 +263,7 @@ class _TransferDetailScreenState extends State<TransferDetailScreen> {
     IconData icon;
     final t = title.toLowerCase();
     if (t.contains('cancel')) {
-      icon = Icons.cancel_outlined;
+      icon = Icons.warning_amber_rounded;
     } else if (t.contains('validate')) {
       icon = Icons.check_circle_outline;
     } else if (t.contains('todo')) {
@@ -262,7 +272,7 @@ class _TransferDetailScreenState extends State<TransferDetailScreen> {
       icon = Icons.info_outline;
     }
 
-    final bool destructive = actionColor == Colors.red;
+    final bool destructive = actionColor == StatusColors.red;
 
     return showDialog<bool>(
       context: context,
@@ -295,11 +305,23 @@ class _TransferDetailScreenState extends State<TransferDetailScreen> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final theme = Theme.of(context);
     final transfer = _currentTransfer ?? widget.transfer;
+    // Actions the transfer's state allows and the user's access rights
+    // permit; the rest are hidden.
+    final access = context.watch<AccessRightsService>();
+    final showEdit =
+        TransferStateHelper.canEdit(transfer.state) &&
+        TransferStateHelper.hasEditRights(access);
+    final showCancel =
+        TransferStateHelper.canCancel(transfer.state) &&
+        TransferStateHelper.hasWriteRights(access);
+    final showMarkAsTodo =
+        TransferStateHelper.canMarkAsTodo(transfer.state) &&
+        TransferStateHelper.hasWriteRights(access);
+    final showValidate =
+        TransferStateHelper.canValidate(transfer.state) &&
+        TransferStateHelper.hasValidateRights(access);
 
     return Scaffold(
-      backgroundColor: isDark
-          ? const Color(0xFF121212)
-          : const Color(0xFFF5F5F5),
       appBar: AppBar(
         backgroundColor: theme.scaffoldBackgroundColor,
         elevation: 0,
@@ -319,16 +341,20 @@ class _TransferDetailScreenState extends State<TransferDetailScreen> {
           ),
         ),
         actions: [
-          if (TransferStateHelper.canEdit(transfer.state))
-            IconButton(
-              icon: Icon(
-                HugeIcons.strokeRoundedPencilEdit02,
-                color: Theme.of(context).brightness == Brightness.dark
-                    ? Colors.grey[400]
-                    : Colors.grey[600],
+          if (showEdit)
+            // A trailing AppBar action sits 12px from the edge, but the body
+            // cards (and the leading arrow) sit at 16px. The 4px nudge lines
+            // the icon up with the content below it.
+            Padding(
+              padding: const EdgeInsets.only(right: 10),
+              child: IconButton(
+                icon: Icon(
+                  HugeIcons.strokeRoundedPencilEdit02,
+                  color: isDark ? Colors.grey[400] : Colors.grey[600],
+                ),
+                onPressed: _isLoading ? null : _editTransfer,
+                tooltip: 'Edit',
               ),
-              onPressed: _isLoading ? null : _editTransfer,
-              tooltip: 'Edit',
             ),
         ],
       ),
@@ -341,39 +367,28 @@ class _TransferDetailScreenState extends State<TransferDetailScreen> {
                 padding: const EdgeInsets.all(16),
                 child: Column(
                   children: [
-                    _buildInfoCard(
-                      isDark,
-                      children: [
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Text(
-                              'Transfer Information',
-                              style: TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w600,
-                                color: isDark ? Colors.white : Colors.black87,
-                              ),
-                            ),
-                            StatusBadge.transfer(transfer.state),
-                          ],
+                    StatusInfoCard(
+                      title: transfer.name,
+                      subtitle: transfer.pickingTypeName ?? 'Internal',
+                      statusLabel: TransferStateHelper.getStateLabel(
+                        transfer.state,
+                      ),
+                      statusColor: TransferStateHelper.getStateColor(
+                        transfer.state,
+                      ),
+                      fields: [
+                        StatusInfoField(
+                          icon: HugeIcons.strokeRoundedCalendar03,
+                          label: 'Scheduled Date',
+                          value: transfer.scheduledDate == null
+                              ? '-'
+                              : _formatDate(transfer.scheduledDate!),
                         ),
-                        const SizedBox(height: 16),
-                        _buildDetailRow('Reference', transfer.name, isDark),
-                        const SizedBox(height: 4),
-                        _buildDetailRow(
-                          'Type',
-                          transfer.pickingTypeName ?? 'Internal',
-                          isDark,
+                        StatusInfoField(
+                          icon: HugeIcons.strokeRoundedPackage,
+                          label: 'Products',
+                          value: '${transfer.moveLines.length}',
                         ),
-                        if (transfer.scheduledDate != null) ...[
-                          const SizedBox(height: 4),
-                          _buildDetailRow(
-                            'Scheduled Date',
-                            _formatDate(transfer.scheduledDate!),
-                            isDark,
-                          ),
-                        ],
                       ],
                     ),
                     const SizedBox(height: 16),
@@ -425,13 +440,13 @@ class _TransferDetailScreenState extends State<TransferDetailScreen> {
                                 vertical: 4,
                               ),
                               decoration: BoxDecoration(
-                                color: theme.primaryColor.withOpacity(0.1),
+                                color: primaryColor,
                                 borderRadius: BorderRadius.circular(12),
                               ),
                               child: Text(
                                 '${transfer.moveLines.length}',
-                                style: TextStyle(
-                                  color: theme.primaryColor,
+                                style: const TextStyle(
+                                  color: Colors.white,
                                   fontSize: 12,
                                   fontWeight: FontWeight.w600,
                                 ),
@@ -464,15 +479,15 @@ class _TransferDetailScreenState extends State<TransferDetailScreen> {
                                   Container(
                                     padding: const EdgeInsets.all(8),
                                     decoration: BoxDecoration(
-                                      color: theme.primaryColor.withOpacity(
-                                        0.1,
+                                      color: primaryColor.withValues(
+                                        alpha: isDark ? 0.2 : 0.1,
                                       ),
                                       borderRadius: BorderRadius.circular(8),
                                     ),
                                     child: Icon(
                                       HugeIcons.strokeRoundedPackage,
                                       size: 20,
-                                      color: theme.primaryColor,
+                                      color: primaryColor,
                                     ),
                                   ),
                                   const SizedBox(width: 12),
@@ -518,10 +533,7 @@ class _TransferDetailScreenState extends State<TransferDetailScreen> {
               ),
             ),
       bottomNavigationBar:
-          _isLoading ||
-              (!TransferStateHelper.canCancel(transfer.state) &&
-                  !TransferStateHelper.canMarkAsTodo(transfer.state) &&
-                  !TransferStateHelper.canValidate(transfer.state))
+          _isLoading || (!showCancel && !showMarkAsTodo && !showValidate)
           ? null
           : Container(
               padding: EdgeInsets.only(
@@ -534,19 +546,17 @@ class _TransferDetailScreenState extends State<TransferDetailScreen> {
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  if (TransferStateHelper.canCancel(transfer.state))
+                  if (showCancel)
                     Expanded(
                       child: _buildOutlinedButton(
                         label: 'Cancel',
-                        icon: Icons.cancel,
+                        icon: Icons.warning_amber_rounded,
                         onPressed: _cancelTransfer,
                       ),
                     ),
-                  if (TransferStateHelper.canCancel(transfer.state) &&
-                      (TransferStateHelper.canMarkAsTodo(transfer.state) ||
-                          TransferStateHelper.canValidate(transfer.state)))
+                  if (showCancel && (showMarkAsTodo || showValidate))
                     const SizedBox(width: 12),
-                  if (TransferStateHelper.canMarkAsTodo(transfer.state))
+                  if (showMarkAsTodo)
                     Expanded(
                       child: _buildFilledButton(
                         label: 'Mark as Todo',
@@ -554,7 +564,7 @@ class _TransferDetailScreenState extends State<TransferDetailScreen> {
                         onPressed: _markAsTodo,
                       ),
                     ),
-                  if (TransferStateHelper.canValidate(transfer.state))
+                  if (showValidate)
                     Expanded(
                       child: _buildFilledButton(
                         label: 'Validate',
@@ -572,15 +582,9 @@ class _TransferDetailScreenState extends State<TransferDetailScreen> {
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 10,
-            offset: const Offset(0, 2),
-          ),
-        ],
+        color: isDark ? AppTheme.darkSurface : Colors.white,
+        borderRadius: BorderRadius.circular(AppRadius.lg),
+        boxShadow: AppShadows.panel(isDark),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -600,7 +604,7 @@ class _TransferDetailScreenState extends State<TransferDetailScreen> {
             label,
             style: TextStyle(
               fontSize: 13,
-              color: isDark ? Colors.grey[400] : const Color(0xff7F7F7F),
+              color: isDark ? Colors.grey[400] : Colors.grey[600],
             ),
           ),
         ),
@@ -629,16 +633,24 @@ class _TransferDetailScreenState extends State<TransferDetailScreen> {
     required VoidCallback onPressed,
   }) {
     final theme = Theme.of(context);
-    return ElevatedButton.icon(
-      onPressed: _isLoading ? null : onPressed,
-      icon: Icon(icon, size: 18),
-      label: Text(label),
-      style: ElevatedButton.styleFrom(
-        backgroundColor: theme.primaryColor,
-        foregroundColor: Colors.white,
-        padding: const EdgeInsets.symmetric(vertical: 14),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        elevation: 0,
+    return SizedBox(
+      height: 48,
+      child: ElevatedButton.icon(
+        onPressed: _isLoading ? null : onPressed,
+        icon: Icon(icon, size: 18),
+        label: Text(
+          label,
+          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+        ),
+        style: ElevatedButton.styleFrom(
+          backgroundColor: theme.primaryColor,
+          foregroundColor: Colors.white,
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+          elevation: 0,
+        ),
       ),
     );
   }
@@ -650,21 +662,27 @@ class _TransferDetailScreenState extends State<TransferDetailScreen> {
   }) {
     final theme = Theme.of(context);
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    return OutlinedButton.icon(
-      onPressed: _isLoading ? null : onPressed,
-      icon: Icon(icon, size: 18, color: theme.primaryColor),
-      label: Text(
-        label,
-        style: TextStyle(
-          color: theme.primaryColor,
-          fontWeight: FontWeight.w600,
+    return SizedBox(
+      height: 48,
+      child: OutlinedButton.icon(
+        onPressed: _isLoading ? null : onPressed,
+        icon: Icon(icon, size: 18, color: theme.primaryColor),
+        label: Text(
+          label,
+          style: TextStyle(
+            color: theme.primaryColor,
+            fontSize: 16,
+            fontWeight: FontWeight.bold,
+          ),
         ),
-      ),
-      style: OutlinedButton.styleFrom(
-        padding: const EdgeInsets.symmetric(vertical: 14),
-        side: BorderSide(color: theme.primaryColor, width: 1.5),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+        style: OutlinedButton.styleFrom(
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          side: BorderSide(color: theme.primaryColor, width: 1.5),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+          backgroundColor: isDark ? AppTheme.darkSurface : Colors.white,
+        ),
       ),
     );
   }
@@ -746,15 +764,9 @@ class _TransferDetailScreenState extends State<TransferDetailScreen> {
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 10,
-            offset: const Offset(0, 2),
-          ),
-        ],
+        color: isDark ? AppTheme.darkSurface : Colors.white,
+        borderRadius: BorderRadius.circular(AppRadius.lg),
+        boxShadow: AppShadows.panel(isDark),
       ),
       child: Shimmer(
         child: Column(

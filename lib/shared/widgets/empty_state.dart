@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:lottie/lottie.dart';
 
+import '../../core/theme/app_theme.dart';
+
 /// A generic placeholder widget displayed when a list or view has no data.
 class EmptyState extends StatelessWidget {
   final String title;
@@ -57,12 +59,16 @@ class EmptyState extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               illustration,
-              const SizedBox(height: 12),
+              // Room under the animation, so the message and the action sit
+              // a little lower than the illustration.
+              const SizedBox(height: 36),
               Text(
                 title,
                 textAlign: TextAlign.center,
-                style: theme.textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.w700,
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: isDark ? Colors.white : const Color(0xFF1A1A1A),
                 ),
               ),
               if (subtitle != null && subtitle!.isNotEmpty) ...[
@@ -70,25 +76,32 @@ class EmptyState extends StatelessWidget {
                 Text(
                   subtitle!,
                   textAlign: TextAlign.center,
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    color: isDark ? Colors.grey[400] : Colors.grey[600],
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.normal,
+                    color: isDark ? Colors.white60 : Colors.black54,
                   ),
                 ),
               ],
               if (actionLabel != null && onAction != null) ...[
                 const SizedBox(height: 16),
-                OutlinedButton(
-                  onPressed: onAction,
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: theme.colorScheme.primary,
-                    side: BorderSide(
-                      color: theme.colorScheme.primary.withOpacity(0.4),
+                SizedBox(
+                  height: 48,
+                  child: OutlinedButton(
+                    onPressed: onAction,
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: theme.primaryColor,
+                      side: BorderSide(color: theme.primaryColor, width: 1.5),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 24,
+                        vertical: 12,
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(AppRadius.md),
+                      ),
                     ),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10),
-                    ),
+                    child: Text(actionLabel!),
                   ),
-                  child: Text(actionLabel!),
                 ),
               ],
             ],

@@ -1,12 +1,88 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:hugeicons/hugeicons.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'dart:async';
-import 'dart:math' as math;
 
-/// A shared layout wrapper for all login-related screens.
-/// Provides a consistent background, header, and styling.
+import '../../../core/services/odoo_session_manager.dart';
+import '../../../shared/widgets/dialogs/access_denied_dialog.dart';
+
+/// Thrown when an account being switched to belongs to an expired database,
+/// so the caller can show [DatabaseExpiry.showExpiredDialog] instead of a
+/// generic failure.
+class DatabaseExpiredException implements Exception {
+  const DatabaseExpiredException();
+
+  @override
+  String toString() => DatabaseExpiry.message;
+}
+
+/// Refuses an Odoo database whose subscription has expired.
+///
+/// Odoo keeps answering RPC calls after a database expires — only its web
+/// client locks the screen — so without this check the app signs in and
+/// works as normal. Every sign-in path runs it on the provisional session,
+/// ahead of the module/access checks, and app launch re-runs it on the
+/// stored session.
+class DatabaseExpiry {
+  DatabaseExpiry._();
+
+  static const String message =
+      'This database has expired. Please contact your administrator or '
+      'Odoo to renew the subscription.';
+
+  /// True when [sessionInfo] — a `/web/session/get_session_info` answer —
+  /// carries an `expiration_date` that has passed.
+  ///
+  /// Odoo Enterprise only sends that date to internal users; Community
+  /// databases have none and never expire. Uses the web client's own rule:
+  /// expired once the days left, rounded, reach zero.
+  static bool isExpiredSessionInfo(Map<String, dynamic>? sessionInfo) {
+    final raw = sessionInfo?['expiration_date'];
+    if (raw is! String) return false;
+
+    final match = RegExp(
+      r'^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2}):(\d{2}))?',
+    ).firstMatch(raw.trim());
+    if (match == null) return false;
+
+    int part(int i) => int.tryParse(match.group(i) ?? '') ?? 0;
+    final expiry = DateTime.utc(
+      part(1),
+      part(2),
+      part(3),
+      part(4),
+      part(5),
+      part(6),
+    );
+    final daysLeft =
+        expiry.difference(DateTime.now()).inSeconds / Duration.secondsPerDay;
+    return daysLeft.round() <= 0;
+  }
+
+  /// Checks the session [OdooSessionManager] currently holds, provisional or
+  /// not. Fails open: a request that can't be answered never locks anyone
+  /// out.
+  static Future<bool> isCurrentSessionExpired() async {
+    return isExpiredSessionInfo(await OdooSessionManager.getSessionInfo());
+  }
+
+  /// The blocking dialog for a sign-in refused because the database expired.
+  static Future<void> showExpiredDialog(
+    BuildContext context, {
+    String actionLabel = 'OK',
+    VoidCallback? onClose,
+  }) {
+    return showAccessDeniedDialog(
+      context,
+      title: 'Database Expired',
+      message: message,
+      actionLabel: actionLabel,
+      onClose: onClose,
+    );
+  }
+}
+
 class LoginLayout extends StatelessWidget {
   final String title;
   final String subtitle;
@@ -33,7 +109,7 @@ class LoginLayout extends StatelessWidget {
               decoration: BoxDecoration(
                 color: isDark ? Colors.grey[950] : Colors.grey[50],
                 image: DecorationImage(
-                  image: AssetImage('assets/images/loginbg.png'),
+                  image: const AssetImage('assets/images/loginbg.png'),
                   fit: BoxFit.cover,
                   colorFilter: ColorFilter.mode(
                     isDark
@@ -140,17 +216,20 @@ class LoginLayout extends StatelessWidget {
     return Row(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        SvgPicture.asset(
-          'assets/images/app-logo/inventory-icon.svg',
-          width: 28,
-          height: 28,
-          fit: BoxFit.fitWidth,
-          color: Colors.white,
+        Padding(
+          padding: const EdgeInsets.only(bottom: 6.0),
+          child: SvgPicture.asset(
+            'assets/images/app-logo/inventory-icon.svg',
+            width: 32,
+            height: 32,
+            fit: BoxFit.contain,
+            colorFilter: const ColorFilter.mode(Colors.white, BlendMode.srcIn),
+          ),
         ),
         const SizedBox(width: 12),
-        Text(
-          'mobo inventory',
-          style: const TextStyle(
+        const Text(
+          'mobo Inventory',
+          style: TextStyle(
             fontFamily: 'YaroRg',
             color: Colors.white,
             fontSize: 28,
@@ -173,7 +252,6 @@ class LoginLayout extends StatelessWidget {
           textAlign: TextAlign.center,
         ),
         const SizedBox(height: 8),
-
         Text(
           subtitle,
           style: GoogleFonts.manrope(
@@ -191,7 +269,7 @@ class LoginLayout extends StatelessWidget {
 class LoginTextField extends StatelessWidget {
   final TextEditingController controller;
   final String hint;
-  final IconData prefixIcon;
+  final dynamic prefixIcon;
   final TextInputType? keyboardType;
   final bool obscureText;
   final bool enabled;
@@ -202,9 +280,9 @@ class LoginTextField extends StatelessWidget {
   final AutovalidateMode? autovalidateMode;
   final FocusNode? focusNode;
   final bool autofocus;
+  final List<String>? autofillHints;
   final TextInputAction? textInputAction;
   final ValueChanged<String>? onFieldSubmitted;
-  final List<String>? autofillHints;
 
   const LoginTextField({
     super.key,
@@ -221,15 +299,16 @@ class LoginTextField extends StatelessWidget {
     this.autovalidateMode,
     this.focusNode,
     this.autofocus = false,
+    this.autofillHints,
     this.textInputAction,
     this.onFieldSubmitted,
-    this.autofillHints,
   });
 
   @override
   Widget build(BuildContext context) {
     return TextFormField(
-      autofillHints: autofillHints,
+      textInputAction: textInputAction,
+      onFieldSubmitted: onFieldSubmitted,
       cursorColor: Colors.black,
       style: GoogleFonts.manrope(
         fontSize: 14,
@@ -241,12 +320,14 @@ class LoginTextField extends StatelessWidget {
       autofocus: autofocus,
       keyboardType: keyboardType,
       obscureText: obscureText,
-      textInputAction: textInputAction,
-      onFieldSubmitted: onFieldSubmitted,
       enabled: enabled,
+      enableSuggestions: false,
+      autocorrect: false,
       validator: validator,
       autovalidateMode: autovalidateMode,
       onChanged: onChanged,
+
+      autofillHints: autofillHints ?? const [],
       decoration: InputDecoration(
         hintText: hint,
         hintStyle: GoogleFonts.manrope(
@@ -254,15 +335,55 @@ class LoginTextField extends StatelessWidget {
           fontWeight: FontWeight.w400,
           color: Colors.black.withOpacity(.4),
         ),
-        prefixIcon: Icon(prefixIcon, size: 20),
-        prefixIconColor: WidgetStateColor.resolveWith(
-          (states) => states.contains(WidgetState.disabled)
-              ? Colors.black26
-              : Colors.black54,
-        ),
+        prefixIcon: prefixIcon is IconData
+            ? Icon(prefixIcon, size: 20)
+            : (prefixIcon is Widget
+                  ? SizedBox(
+                      width: 48,
+                      height: 48,
+                      child: Center(child: prefixIcon),
+                    )
+                  : SizedBox(
+                      width: 48,
+                      height: 48,
+                      child: Center(
+                        child: Transform.scale(
+                          scale: 20 / 24.0,
+                          child: HugeIcon(
+                            icon: prefixIcon,
+                            color: enabled ? Colors.black54 : Colors.black26,
+                          ),
+                        ),
+                      ),
+                    )),
+        prefixIconColor: prefixIcon is IconData
+            ? MaterialStateColor.resolveWith(
+                (states) => states.contains(MaterialState.disabled)
+                    ? Colors.black26
+                    : Colors.black54,
+              )
+            : null,
+        // Built like the prefix above: a 48x48 box with the glyph centred in
+        // it. Handing `InputDecoration` a bare icon let it size the suffix
+        // from its own constraints, so the error icon came out far larger
+        // than the 20px prefix it sits opposite.
         suffixIcon: hasError
-            ? Icon(Icons.error_outline, color: Colors.red, size: 20)
+            ? SizedBox(
+                width: 48,
+                height: 48,
+                child: Center(
+                  child: HugeIcon(
+                    icon: HugeIcons.strokeRoundedAlertCircle,
+                    color: Colors.red,
+                    size: 20,
+                  ),
+                ),
+              )
             : suffixIcon,
+        suffixIconConstraints: const BoxConstraints(
+          minWidth: 48,
+          minHeight: 48,
+        ),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
           borderSide: BorderSide.none,
@@ -303,134 +424,79 @@ class LoginDropdownField extends StatefulWidget {
 }
 
 class _LoginDropdownFieldState extends State<LoginDropdownField> {
-  final LayerLink _layerLink = LayerLink();
-  OverlayEntry? _overlayEntry;
-
   @override
   void dispose() {
-    _removeOverlay();
     super.dispose();
   }
 
   Future<void> _handleMenuOpen(BuildContext context) async {
     FocusScope.of(context).unfocus();
-
     await Future.delayed(const Duration(milliseconds: 250));
-
     if (!mounted) return;
-    _showDropdownOverlay();
+    _openDropdownMenu(context);
   }
 
-  void _showDropdownOverlay() {
+  Future<void> _openDropdownMenu(BuildContext context) async {
     final uniqueItems = widget.items.toSet().toList();
-    if (uniqueItems.isEmpty) return;
-    if (_overlayEntry != null) return;
 
-    final renderBox = context.findRenderObject() as RenderBox?;
-    final fieldWidth =
-        renderBox?.size.width ?? (MediaQuery.of(context).size.width - 48);
+    final RenderBox? button = context.findRenderObject() as RenderBox?;
+    if (button == null) return;
 
-    final fieldOffset = renderBox?.localToGlobal(Offset.zero) ?? Offset.zero;
-    final screenHeight = MediaQuery.of(context).size.height;
-    final fieldHeight = renderBox?.size.height ?? 0;
-    final availableBelow = screenHeight - (fieldOffset.dy + fieldHeight) - 16;
+    final RenderBox overlay =
+        Navigator.of(context).overlay!.context.findRenderObject() as RenderBox;
+    final Offset offset = button.localToGlobal(Offset.zero, ancestor: overlay);
+    final Size size = button.size;
 
-    const double itemHeight = 44.0;
-    const double listVerticalPadding = 16.0;
-    final double heightForFiveItems = itemHeight * 5 + listVerticalPadding;
-    final double maxDropdownHeight = math.max(
-      120.0,
-      math.min(availableBelow, heightForFiveItems),
+    final double spaceBelow = overlay.size.height - (offset.dy + size.height);
+    final double spaceAbove = offset.dy;
+
+    const double maxMenuHeight = 240.0;
+    final double menuHeight = (uniqueItems.length * 48.0).clamp(
+      0.0,
+      maxMenuHeight,
     );
-    final isDark = Theme.of(context).brightness == Brightness.dark;
 
-    _overlayEntry = OverlayEntry(
-      builder: (overlayContext) => Stack(
-        children: [
-          Positioned.fill(
-            child: GestureDetector(
-              behavior: HitTestBehavior.translucent,
-              onTap: _hideDropdown,
-            ),
-          ),
-          Positioned(
-            width: fieldWidth,
-            child: CompositedTransformFollower(
-              link: _layerLink,
-              showWhenUnlinked: false,
-              offset: const Offset(0, 58),
-              child: Material(
-                elevation: 12.0,
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(12),
-                shadowColor: Colors.black.withOpacity(0.2),
-                child: Container(
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                      color: isDark
-                          ? Colors.white.withOpacity(0.1)
-                          : Colors.black.withOpacity(0.1),
-                      width: 1,
-                    ),
-                  ),
-                  child: ConstrainedBox(
-                    constraints: BoxConstraints(maxHeight: maxDropdownHeight),
-                    child: ListView.builder(
-                      padding: const EdgeInsets.symmetric(vertical: 8),
-                      shrinkWrap: true,
-                      itemExtent: itemHeight,
-                      itemCount: uniqueItems.length,
-                      itemBuilder: (context, index) {
-                        final item = uniqueItems[index];
-                        return InkWell(
-                          onTap: () {
-                            widget.onChanged?.call(item);
-                            _hideDropdown();
-                          },
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 12,
-                            ),
-                            child: Text(
-                              item,
-                              overflow: TextOverflow.ellipsis,
-                              style: GoogleFonts.manrope(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w400,
-                                color: Colors.black,
-                              ),
-                            ),
-                          ),
-                        );
-                      },
-                    ),
-                  ),
-                ),
+    final bool openUpwards = spaceBelow < menuHeight && spaceAbove > spaceBelow;
+
+    final selected = await showMenu<String>(
+      context: context,
+      color: Colors.white,
+      position: RelativeRect.fromRect(
+        openUpwards
+            ? Rect.fromLTWH(offset.dx, offset.dy - menuHeight, size.width, 0)
+            : Rect.fromLTWH(
+                offset.dx,
+                offset.dy + size.height - 1,
+                size.width,
+                0,
               ),
+        Offset.zero & overlay.size,
+      ),
+      constraints: BoxConstraints(
+        minWidth: size.width,
+        maxWidth: size.width,
+        maxHeight: maxMenuHeight,
+      ),
+      items: uniqueItems.map((item) {
+        return PopupMenuItem<String>(
+          value: item,
+          height: 48,
+          child: Text(
+            item,
+            overflow: TextOverflow.ellipsis,
+            style: GoogleFonts.manrope(
+              fontSize: 14,
+              fontWeight: FontWeight.w400,
+              color: Colors.black,
             ),
           ),
-        ],
-      ),
+        );
+      }).toList(),
     );
 
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || _overlayEntry == null) return;
-      final overlayState = Overlay.maybeOf(context);
-      if (overlayState != null && overlayState.mounted) {
-        overlayState.insert(_overlayEntry!);
-      }
-    });
-  }
-
-  void _hideDropdown() {
-    _removeOverlay();
-  }
-
-  void _removeOverlay() {
-    _overlayEntry?.remove();
-    _overlayEntry = null;
+    if (selected != null && mounted) {
+      widget.onChanged?.call(selected);
+    }
   }
 
   @override
@@ -439,93 +505,93 @@ class _LoginDropdownFieldState extends State<LoginDropdownField> {
     final safeValue = uniqueItems.contains(widget.value) ? widget.value : null;
     final bool isEnabled = widget.onChanged != null;
 
-    return CompositedTransformTarget(
-      link: _layerLink,
-      child: FormField<String>(
-        initialValue: safeValue,
-        validator: widget.validator,
-        autovalidateMode: widget.autovalidateMode,
-        builder: (field) {
-          final externalValue = uniqueItems.contains(widget.value)
-              ? widget.value
-              : null;
-          if (field.value != externalValue) {
-            WidgetsBinding.instance.addPostFrameCallback((_) {
-              field.didChange(externalValue);
-            });
-          }
+    return FormField<String>(
+      key: ValueKey(safeValue),
+      initialValue: safeValue,
+      validator: widget.validator,
+      autovalidateMode: widget.autovalidateMode,
+      builder: (field) {
+        final effectiveValue = safeValue;
+        final showErrorIcon =
+            widget.hasError &&
+            (effectiveValue == null || effectiveValue.isEmpty);
 
-          final effectiveValue = externalValue;
-          final showErrorIcon =
-              widget.hasError &&
-              (effectiveValue == null || effectiveValue.isEmpty);
+        return Builder(
+          builder: (rowCtx) {
+            return InkWell(
+              onTap: isEnabled ? () => _handleMenuOpen(rowCtx) : null,
+              borderRadius: BorderRadius.circular(12),
+              child: InputDecorator(
+                isEmpty: (effectiveValue == null || effectiveValue.isEmpty),
+                decoration: InputDecoration(
+                  enabled: isEnabled,
 
-          return Builder(
-            builder: (rowCtx) {
-              return InkWell(
-                onTap: () => _handleMenuOpen(rowCtx),
-                borderRadius: BorderRadius.circular(12),
-                child: InputDecorator(
-                  isEmpty: (effectiveValue == null || effectiveValue.isEmpty),
-                  decoration: InputDecoration(
-                    enabled: isEnabled,
-                    prefixIcon: Icon(Icons.storage, size: 20),
-                    prefixIconColor: WidgetStateColor.resolveWith(
-                      (states) => states.contains(WidgetState.disabled)
-                          ? Colors.black26
-                          : Colors.black54,
+                  prefixIcon: SizedBox(
+                    width: 48,
+                    height: 48,
+                    child: Center(
+                      child: HugeIcon(
+                        icon: HugeIcons.strokeRoundedDatabase,
+                        color: isEnabled ? Colors.black54 : Colors.black26,
+                      ),
                     ),
-                    suffixIcon: showErrorIcon
-                        ? Icon(Icons.error, color: Colors.red[900], size: 20)
-                        : InkWell(
-                            borderRadius: BorderRadius.circular(20),
-                            onTap: () {
-                              if (_overlayEntry == null) {
-                                _handleMenuOpen(rowCtx);
-                              } else {
-                                _hideDropdown();
-                              }
-                            },
-                            child: Icon(
-                              _overlayEntry == null
-                                  ? Icons.keyboard_arrow_down
-                                  : Icons.keyboard_arrow_up,
+                  ),
+                  suffixIcon: showErrorIcon
+                      ? SizedBox(
+                          width: 48,
+                          height: 48,
+                          child: Center(
+                            child: HugeIcon(
+                              icon: HugeIcons.strokeRoundedAlertCircle,
+                              color: Colors.red,
                               size: 20,
-                              color: isEnabled
-                                  ? Colors.black54
-                                  : Colors.black26,
                             ),
                           ),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: BorderSide.none,
-                    ),
-                    filled: true,
-                    fillColor: Colors.white,
-                    contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 20,
-                      vertical: 16,
-                    ),
-                    errorText: field.errorText,
-                    errorStyle: const TextStyle(color: Colors.white),
+                        )
+                      : SizedBox(
+                          width: 48,
+                          height: 48,
+                          child: Center(
+                            child: Transform.scale(
+                              scale: 20 / 24.0,
+                              child: HugeIcon(
+                                icon: HugeIcons.strokeRoundedArrowDown01,
+                                color: isEnabled
+                                    ? Colors.black54
+                                    : Colors.black26,
+                              ),
+                            ),
+                          ),
+                        ),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide.none,
                   ),
-                  child: Text(
-                    effectiveValue ?? widget.hint,
-                    overflow: TextOverflow.ellipsis,
-                    style: GoogleFonts.manrope(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w400,
-                      color: (effectiveValue == null || effectiveValue.isEmpty)
-                          ? Colors.black.withOpacity(.4)
-                          : Colors.black,
-                    ),
+                  filled: true,
+                  fillColor: Colors.white,
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 20,
+                    vertical: 16,
+                  ),
+                  errorText: field.errorText,
+                  errorStyle: const TextStyle(color: Colors.white),
+                ),
+                child: Text(
+                  effectiveValue ?? widget.hint,
+                  overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.manrope(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w400,
+                    color: (effectiveValue == null || effectiveValue.isEmpty)
+                        ? Colors.black.withOpacity(.4)
+                        : Colors.black,
                   ),
                 ),
-              );
-            },
-          );
-        },
-      ),
+              ),
+            );
+          },
+        );
+      },
     );
   }
 }
@@ -549,7 +615,11 @@ class LoginErrorDisplay extends StatelessWidget {
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
-                    Icon(Icons.error, color: Colors.white, size: 18),
+                    HugeIcon(
+                      icon: HugeIcons.strokeRoundedAlertCircle,
+                      color: Colors.white,
+                      size: 18,
+                    ),
                     const SizedBox(width: 6),
                     Expanded(
                       child: Text(
@@ -574,7 +644,7 @@ class LoginErrorDisplay extends StatelessWidget {
 class LoginUrlTextField extends StatefulWidget {
   final TextEditingController controller;
   final String hint;
-  final IconData prefixIcon;
+  final dynamic prefixIcon;
   final bool enabled;
   final String? Function(String?)? validator;
   final bool hasError;
@@ -584,8 +654,11 @@ class LoginUrlTextField extends StatefulWidget {
   final bool autofocus;
   final String selectedProtocol;
   final ValueChanged<String>? onProtocolChanged;
+  final List<String> urlHistory;
   final bool isLoading;
 
+  /// Called when a typed `http://` / `https://` is moved into the protocol
+  /// selector.
   final VoidCallback? onProtocolAutoDetected;
 
   const LoginUrlTextField({
@@ -602,6 +675,7 @@ class LoginUrlTextField extends StatefulWidget {
     this.autofocus = false,
     this.selectedProtocol = 'https://',
     this.onProtocolChanged,
+    this.urlHistory = const [],
     this.isLoading = false,
     this.onProtocolAutoDetected,
   });
@@ -616,7 +690,6 @@ class _LoginUrlTextFieldState extends State<LoginUrlTextField> {
   @override
   void initState() {
     super.initState();
-
     widget.controller.addListener(_handleTypedProtocolInField);
   }
 
@@ -626,6 +699,8 @@ class _LoginUrlTextFieldState extends State<LoginUrlTextField> {
     super.dispose();
   }
 
+  /// Moves a typed or pasted `http://` / `https://` out of the field and into
+  /// the protocol selector, so the field only ever holds the address.
   void _handleTypedProtocolInField() {
     if (_isAdjustingText) return;
     final raw = widget.controller.text;
@@ -667,9 +742,7 @@ class _LoginUrlTextFieldState extends State<LoginUrlTextField> {
 
   Future<void> _handleProtocolMenuOpen(BuildContext context) async {
     FocusScope.of(context).unfocus();
-
     await Future.delayed(const Duration(milliseconds: 250));
-
     if (!mounted) return;
     _openProtocolMenu(context);
   }
@@ -742,13 +815,22 @@ class _LoginUrlTextFieldState extends State<LoginUrlTextField> {
           children: [
             Padding(
               padding: const EdgeInsets.only(left: 12, right: 8),
-              child: Icon(
-                widget.prefixIcon,
-                size: 20,
-                color: widget.enabled ? Colors.black54 : Colors.black26,
-              ),
+              child: widget.prefixIcon is IconData
+                  ? Icon(
+                      widget.prefixIcon,
+                      size: 20,
+                      color: widget.enabled ? Colors.black54 : Colors.black26,
+                    )
+                  : (widget.prefixIcon is Widget
+                        ? widget.prefixIcon
+                        : HugeIcon(
+                            icon: HugeIcons.strokeRoundedServerStack01,
+                            size: 20,
+                            color: widget.enabled
+                                ? Colors.black54
+                                : Colors.black26,
+                          )),
             ),
-
             Container(
               decoration: BoxDecoration(
                 border: Border(
@@ -801,20 +883,22 @@ class _LoginUrlTextFieldState extends State<LoginUrlTextField> {
         ),
         prefixIconConstraints: const BoxConstraints(minWidth: 0, minHeight: 0),
         suffixIcon: widget.hasError
-            ? Icon(Icons.error_outline, color: Colors.red, size: 20)
-            : widget.isLoading
-            ? Padding(
-                padding: const EdgeInsets.all(12.0),
-                child: SizedBox(
-                  width: 16,
-                  height: 16,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    valueColor: AlwaysStoppedAnimation<Color>(Colors.black54),
-                  ),
-                ),
-              )
-            : null,
+            ? const Icon(Icons.error_outline, color: Colors.red, size: 20)
+            : (widget.isLoading
+                  ? Padding(
+                      padding: const EdgeInsets.all(12.0),
+                      child: SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          valueColor: AlwaysStoppedAnimation<Color>(
+                            Colors.black54,
+                          ),
+                        ),
+                      ),
+                    )
+                  : null),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
           borderSide: BorderSide.none,
@@ -837,6 +921,7 @@ class LoginButton extends StatelessWidget {
   final VoidCallback? onPressed;
   final bool isLoading;
   final Widget? loadingWidget;
+  final bool isEnabled;
 
   const LoginButton({
     super.key,
@@ -844,14 +929,17 @@ class LoginButton extends StatelessWidget {
     this.onPressed,
     this.isLoading = false,
     this.loadingWidget,
+    this.isEnabled = true,
   });
 
   @override
   Widget build(BuildContext context) {
+    final bool isInteractive = isEnabled && !isLoading && onPressed != null;
+
     return SizedBox(
-      height: 48,
+      height: 52,
       child: ElevatedButton(
-        onPressed: isLoading ? null : onPressed,
+        onPressed: isInteractive ? onPressed : null,
         style: ElevatedButton.styleFrom(
           backgroundColor: Colors.black,
           foregroundColor: Colors.white,
@@ -860,6 +948,7 @@ class LoginButton extends StatelessWidget {
           overlayColor: Colors.transparent,
           surfaceTintColor: Colors.transparent,
           elevation: 0,
+          shadowColor: Colors.transparent,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),
           ),
@@ -869,8 +958,9 @@ class LoginButton extends StatelessWidget {
             : Text(
                 text,
                 style: GoogleFonts.manrope(
-                  fontSize: 14,
-                  fontWeight: FontWeight.bold,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.white,
                 ),
               ),
       ),

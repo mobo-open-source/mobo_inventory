@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:hugeicons/hugeicons.dart';
 import '../../../core/services/haptics_service.dart';
+import '../../../core/theme/app_theme.dart';
 
 class ProductSelectorDialog extends StatefulWidget {
   final List<Map<String, dynamic>> products;
@@ -42,8 +43,9 @@ class _ProductSelectorDialogState extends State<ProductSelectorDialog> {
     }).toList();
 
     return Dialog(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      backgroundColor: isDark ? const Color(0xFF232323) : Colors.white,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      elevation: 0,
+      backgroundColor: isDark ? AppTheme.darkSurface : Colors.white,
       child: Container(
         width: MediaQuery.of(context).size.width * 0.9,
         height: MediaQuery.of(context).size.height * 0.8,
@@ -62,8 +64,8 @@ class _ProductSelectorDialogState extends State<ProductSelectorDialog> {
                   child: Text(
                     widget.title,
                     style: theme.textTheme.titleLarge?.copyWith(
-                      fontWeight: FontWeight.w600,
-                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 18,
                     ),
                   ),
                 ),
@@ -76,50 +78,70 @@ class _ProductSelectorDialogState extends State<ProductSelectorDialog> {
             ),
             const SizedBox(height: 16),
 
-            TextField(
-              controller: _searchController,
-              autofocus: true,
-              onTapOutside: (val) => FocusScope.of(context).unfocus(),
-              decoration: InputDecoration(
-                hintText: 'Search by name, code, or barcode...',
-                prefixIcon: Icon(
-                  HugeIcons.strokeRoundedSearch01,
-                  color: isDark ? Colors.grey[400] : Colors.grey[600],
-                  size: 20,
-                ),
-                suffixIcon: _searchQuery.isNotEmpty
-                    ? IconButton(
-                        icon: Icon(
-                          Icons.clear,
-                          color: isDark ? Colors.grey[400] : Colors.grey,
-                          size: 20,
-                        ),
-                        onPressed: () {
-                          _searchController.clear();
-                          setState(() => _searchQuery = '');
-                        },
-                      )
-                    : null,
-                filled: true,
-                fillColor: isDark ? Colors.grey[850] : Colors.grey[50],
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide.none,
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide(color: theme.primaryColor),
-                ),
-                contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 14,
-                ),
-                isDense: true,
+            Container(
+              height: 40,
+              decoration: BoxDecoration(
+                color: isDark ? const Color(0xFF2A2A2A) : Colors.white,
+                borderRadius: BorderRadius.circular(12),
+                boxShadow: AppShadows.search,
               ),
-              onChanged: (value) {
-                setState(() => _searchQuery = value);
-                HapticsService.light();
-              },
+              child: TextField(
+                controller: _searchController,
+                autofocus: true,
+                onTapOutside: (val) => FocusScope.of(context).unfocus(),
+                style: const TextStyle(fontSize: 14),
+                decoration: InputDecoration(
+                  isCollapsed: true,
+                  hintText: 'Search by name, code, or barcode...',
+                  hintStyle: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w400,
+                  ),
+                  prefixIcon: Padding(
+                    padding: const EdgeInsets.only(left: 14, right: 8),
+                    child: Icon(
+                      HugeIcons.strokeRoundedSearch01,
+                      color: isDark ? Colors.grey[400] : Colors.grey[600],
+                      size: 20,
+                    ),
+                  ),
+                  prefixIconConstraints: const BoxConstraints(
+                    minWidth: 0,
+                    minHeight: 0,
+                  ),
+                  suffixIcon: _searchQuery.isNotEmpty
+                      ? IconButton(
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(),
+                          icon: Icon(
+                            Icons.clear_rounded,
+                            color: isDark ? Colors.grey[400] : Colors.grey,
+                            size: 18,
+                          ),
+                          onPressed: () {
+                            _searchController.clear();
+                            setState(() => _searchQuery = '');
+                          },
+                        )
+                      : null,
+                  suffixIconConstraints: const BoxConstraints(
+                    minWidth: 40,
+                    minHeight: 40,
+                  ),
+                  border: InputBorder.none,
+                  enabledBorder: InputBorder.none,
+                  focusedBorder: InputBorder.none,
+                  filled: false,
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 10,
+                  ),
+                ),
+                onChanged: (value) {
+                  setState(() => _searchQuery = value);
+                  HapticsService.light();
+                },
+              ),
             ),
             const SizedBox(height: 16),
 
@@ -183,25 +205,17 @@ class _ProductSelectorDialogState extends State<ProductSelectorDialog> {
                                   'Unit'
                             : 'Unit';
 
-                        return Container(
-                          margin: const EdgeInsets.only(bottom: 8),
-                          decoration: BoxDecoration(
-                            color: isDark ? Colors.grey[850] : Colors.grey[50],
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(
-                              color: isDark
-                                  ? Colors.grey[800]!
-                                  : Colors.grey[200]!,
-                            ),
-                          ),
-                          child: InkWell(
-                            onTap: () {
-                              HapticsService.selection();
-                              Navigator.pop(context, product);
-                            },
-                            borderRadius: BorderRadius.circular(12),
+                        return InkWell(
+                          onTap: () {
+                            HapticsService.selection();
+                            Navigator.pop(context, product);
+                          },
+                          borderRadius: BorderRadius.circular(12),
+                          child: Container(
+                            margin: const EdgeInsets.only(bottom: 12),
+                            decoration: AppTheme.cardDecoration(isDark),
                             child: Padding(
-                              padding: const EdgeInsets.all(16),
+                              padding: const EdgeInsets.all(14),
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
@@ -215,33 +229,16 @@ class _ProductSelectorDialogState extends State<ProductSelectorDialog> {
                                             fontWeight: FontWeight.w600,
                                             color: isDark
                                                 ? Colors.white
-                                                : Colors.black87,
+                                                : AppTheme.primaryColor,
                                           ),
                                         ),
                                       ),
-                                      Container(
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 8,
-                                          vertical: 4,
-                                        ),
-                                        decoration: BoxDecoration(
-                                          color: qtyAvailable > 0
-                                              ? Colors.green.withOpacity(0.1)
-                                              : Colors.orange.withOpacity(0.1),
-                                          borderRadius: BorderRadius.circular(
-                                            8,
-                                          ),
-                                        ),
-                                        child: Text(
-                                          '$qtyAvailable $uomName',
-                                          style: TextStyle(
-                                            fontSize: 12,
-                                            fontWeight: FontWeight.w600,
-                                            color: qtyAvailable > 0
-                                                ? Colors.green
-                                                : Colors.orange,
-                                          ),
-                                        ),
+                                      StatusColors.buildStatusBadge(
+                                        '$qtyAvailable $uomName',
+                                        qtyAvailable > 0
+                                            ? StatusColors.green
+                                            : StatusColors.orange,
+                                        isDark: isDark,
                                       ),
                                     ],
                                   ),

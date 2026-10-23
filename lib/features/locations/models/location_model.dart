@@ -1,3 +1,5 @@
+import '../../../core/utils/odoo_value.dart';
+
 class StockLocation {
   final int id;
   final String name;
@@ -30,9 +32,7 @@ class StockLocation {
     return StockLocation(
       id: json['id'] as int,
       name: (json['name'] ?? '').toString(),
-      completeName: (json['complete_name'] ?? '').toString().isEmpty
-          ? null
-          : (json['complete_name'] ?? '').toString(),
+      completeName: odooString(json['complete_name']),
       usage: (json['usage'] ?? 'internal').toString(),
       parentId: parentId,
       parentName: parentName,

@@ -3,10 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:video_player/video_player.dart';
 import '../../../core/theme/app_theme.dart';
-import '../../../core/services/module_validation_service.dart';
-import '../../../core/services/odoo_session_manager.dart';
 import '../../../core/routing/app_routes.dart';
-import '../../widgets/snackbars/custom_snackbar.dart';
 
 /// The initial application screen that plays a promotional video and performs background module validation.
 class SplashScreen extends StatefulWidget {
@@ -20,7 +17,6 @@ class _SplashScreenState extends State<SplashScreen> {
   static bool _hasPlayedOnce = false;
   VideoPlayerController? _videoController;
   bool _isVideoInitialized = false;
-  bool _isValidatingModules = false;
   Timer? _safetyTimer;
   bool _hasNavigated = false;
 
@@ -95,45 +91,10 @@ class _SplashScreenState extends State<SplashScreen> {
     _safetyTimer?.cancel();
 
     if (!mounted) return;
+    // Module and portal-access checks run in AppEntry, which signs out a
+    // session that no longer qualifies — a second check here would only
+    // race it with a contradictory warning.
     context.goNamed(AppRoutes.app);
-
-    Future.microtask(_runPostNavigationValidation);
-  }
-
-  Future<void> _runPostNavigationValidation() async {
-    if (_isValidatingModules) return;
-
-    setState(() {
-      _isValidatingModules = true;
-    });
-
-    try {
-      final session = await OdooSessionManager.getCurrentSession();
-      if (session == null) {
-        return;
-      }
-
-      final moduleStatus = await ModuleValidationService.instance
-          .validateRequiredModules(forceRefresh: true);
-
-      final inventoryInstalled = moduleStatus['stock'] ?? false;
-
-      if (!inventoryInstalled) {
-        Future.delayed(const Duration(milliseconds: 400), () {
-          if (mounted) {
-            CustomSnackbar.show(
-              context: context,
-              title: 'Missing Module',
-              message:
-                  '📦 The Inventory app is not installed on your Odoo server. '
-                  'Some features may not work. Please contact your administrator.',
-              type: SnackbarType.warning,
-              duration: const Duration(seconds: 8),
-            );
-          }
-        });
-      }
-    } catch (e) {}
   }
 
   @override

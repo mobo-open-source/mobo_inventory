@@ -3,22 +3,26 @@ import 'dart:io';
 
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
+
 import 'package:hugeicons/hugeicons.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:loading_animation_widget/loading_animation_widget.dart';
 import 'package:provider/provider.dart';
-import 'package:google_fonts/google_fonts.dart';
 
 import '../providers/profile_provider.dart';
 import '../../../shared/widgets/snackbars/custom_snackbar.dart';
 import '../../../shared/widgets/forms/custom_text_field.dart';
 import '../../../shared/widgets/forms/custom_dropdown_field.dart';
 import '../../../shared/widgets/dialogs/data_loss_warning_dialog.dart';
+import '../../../shared/widgets/mobo/mobo_button.dart';
 import '../../../shared/widgets/loaders/list_shimmer.dart';
 import '../../../core/services/odoo_session_manager.dart';
 import '../../../core/services/haptics_service.dart';
 import '../../../shared/widgets/odoo_avatar.dart';
+import '../../../shared/widgets/search/mobo_search_bar.dart';
+import '../../../core/theme/app_theme.dart';
 
 /// A screen that displays and allows editing of detailed user profile information.
 ///
@@ -70,7 +74,10 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
   void didChangeDependencies() {
     super.didChangeDependencies();
 
-    if (mounted) {
+    // Never while editing: this also fires when MediaQuery changes — the
+    // keyboard opening is enough — and re-seeding then threw away whatever
+    // the user had typed into the field they just tapped.
+    if (mounted && !_isEditMode) {
       _updateControllers();
     }
   }
@@ -160,15 +167,15 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      backgroundColor: isDark ? AppTheme.darkSurface : Colors.grey[50],
       builder: (context) => Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const SizedBox(height: 8),
+          const SizedBox(height: 12),
           Container(
             width: 40,
             height: 4,
-            margin: const EdgeInsets.only(bottom: 12),
+            margin: const EdgeInsets.only(bottom: 8),
             decoration: BoxDecoration(
               color: isDark ? Colors.grey[700] : Colors.grey[300],
               borderRadius: BorderRadius.circular(2),
@@ -176,15 +183,15 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
           ),
           InkWell(
             onTap: () {
-              context.pop();
+              Navigator.pop(context);
               _pickImageFromSource(ImageSource.camera);
             },
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
               child: Row(
                 children: [
-                  Icon(
-                    HugeIcons.strokeRoundedCamera02,
+                  HugeIcon(
+                    icon: HugeIcons.strokeRoundedCamera02,
                     size: 24,
                     color: isDark ? Colors.white : Colors.black87,
                   ),
@@ -201,15 +208,15 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
           ),
           InkWell(
             onTap: () {
-              context.pop();
+              Navigator.pop(context);
               _pickImageFromSource(ImageSource.gallery);
             },
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
               child: Row(
                 children: [
-                  Icon(
-                    HugeIcons.strokeRoundedImageCrop,
+                  HugeIcon(
+                    icon: HugeIcons.strokeRoundedImageCrop,
                     size: 24,
                     color: isDark ? Colors.white : Colors.black87,
                   ),
@@ -267,39 +274,18 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
       final provider = context.read<ProfileProvider>();
       final userData = provider.userData!;
 
-      final userUpdates = <String, dynamic>{};
-      final partnerUpdates = <String, dynamic>{};
+      // Which model each field belongs to is the provider's call, not the
+      // screen's: it depends on the connected release and, for mobile, on
+      // this server's schema. See ProfileProvider.saveProfileEdits.
+      final changes = <String, dynamic>{};
+      _editableFields().forEach((field, controller) {
+        final value = controller.text.trim();
+        if (value != _normalizeForEdit(userData[field])) {
+          changes[field] = value;
+        }
+      });
 
-      if (_nameController.text.trim() != _normalizeForEdit(userData['name'])) {
-        userUpdates['name'] = _nameController.text.trim();
-      }
-      if (_emailController.text.trim() !=
-          _normalizeForEdit(userData['email'])) {
-        userUpdates['email'] = _emailController.text.trim();
-      }
-      if (_phoneController.text.trim() !=
-          _normalizeForEdit(userData['phone'])) {
-        partnerUpdates['phone'] = _phoneController.text.trim();
-      }
-      if (_mobileController.text.trim() !=
-          _normalizeForEdit(userData['mobile'])) {
-        partnerUpdates['mobile'] = _mobileController.text.trim();
-      }
-      if (_websiteController.text.trim() !=
-          _normalizeForEdit(userData['website'])) {
-        partnerUpdates['website'] = _websiteController.text.trim();
-      }
-      if (_functionController.text.trim() !=
-          _normalizeForEdit(userData['function'])) {
-        partnerUpdates['function'] = _functionController.text.trim();
-      }
-
-      if (userUpdates.isNotEmpty) {
-        await provider.updateProfileFields(userUpdates);
-      }
-      if (partnerUpdates.isNotEmpty) {
-        await provider.updatePartnerFields(partnerUpdates);
-      }
+      await provider.saveProfileEdits(changes);
 
       isSuccess = true;
       _saveSuccess = true;
@@ -311,7 +297,7 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
 
       if (_isShowingLoadingDialog) {
         _isShowingLoadingDialog = false;
-        context.pop();
+        Navigator.pop(context);
       }
 
       if (isSuccess) {
@@ -343,20 +329,32 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
     }
   }
 
+  /// The text-editable rows currently on screen, keyed by Odoo field name.
+  ///
+  /// Filtered by availability, so a field this server does not define is
+  /// neither diffed for unsaved changes nor sent on save — its controller
+  /// still holds seeded text, but no row is showing it.
+  Map<String, TextEditingController> _editableFields() {
+    final provider = context.read<ProfileProvider>();
+    return <String, TextEditingController>{
+      'name': _nameController,
+      'email': _emailController,
+      'phone': _phoneController,
+      'mobile': _mobileController,
+      'website': _websiteController,
+      'function': _functionController,
+    }..removeWhere((field, _) => !provider.isProfileFieldAvailable(field));
+  }
+
   bool _hasUnsavedChanges() {
     final provider = context.read<ProfileProvider>();
     final userData = provider.userData;
     if (userData == null) return false;
 
-    return _nameController.text.trim() != _normalizeForEdit(userData['name']) ||
-        _emailController.text.trim() != _normalizeForEdit(userData['email']) ||
-        _phoneController.text.trim() != _normalizeForEdit(userData['phone']) ||
-        _mobileController.text.trim() !=
-            _normalizeForEdit(userData['mobile']) ||
-        _websiteController.text.trim() !=
-            _normalizeForEdit(userData['website']) ||
-        _functionController.text.trim() !=
-            _normalizeForEdit(userData['function']);
+    return _editableFields().entries.any(
+      (entry) =>
+          entry.value.text.trim() != _normalizeForEdit(userData[entry.key]),
+    );
   }
 
   Future<bool> _showUnsavedChangesDialog() async {
@@ -381,8 +379,8 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
       barrierDismissible: false,
       builder: (ctx) => Dialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        backgroundColor: isDark ? const Color(0xFF212121) : Colors.white,
-        elevation: 8,
+        backgroundColor: isDark ? AppTheme.darkSurface : Colors.white,
+        elevation: 0,
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 28),
           child: Column(
@@ -393,12 +391,12 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
                 height: 56,
                 decoration: BoxDecoration(
                   color: isDark
-                      ? Colors.white.withOpacity(0.12)
-                      : const Color(0xFF1E88E5).withOpacity(0.1),
+                      ? Colors.white.withValues(alpha: 0.12)
+                      : Theme.of(context).primaryColor.withValues(alpha: 0.1),
                   shape: BoxShape.circle,
                 ),
                 child: LoadingAnimationWidget.fourRotatingDots(
-                  color: isDark ? Colors.white : const Color(0xFF1E88E5),
+                  color: isDark ? Colors.white : Theme.of(context).primaryColor,
                   size: 32,
                 ),
               ),
@@ -423,6 +421,24 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
         ),
       ),
     );
+  }
+
+  /// Disposes the Edit Address dialog's own controllers once it is actually
+  /// gone rather than the moment its `pop()` is requested.
+  ///
+  /// [Navigator.pop] only starts the dialog route's exit transition; the
+  /// `CustomTextField`s bound to these controllers stay mounted and
+  /// rebuilding for its duration. Disposing them immediately after `pop()`
+  /// used to crash with "A TextEditingController was used after being
+  /// disposed" mid fade-out — a full route-transition duration is the
+  /// shortest safe margin, since there is no callback for "the popped route
+  /// finished leaving".
+  void _disposeAddressControllers(List<TextEditingController> controllers) {
+    Future.delayed(const Duration(milliseconds: 400), () {
+      for (final controller in controllers) {
+        controller.dispose();
+      }
+    });
   }
 
   void _showEditAddressDialog() {
@@ -459,28 +475,39 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
         ? userData['state_id'][0] as int
         : null;
 
+    final rootContext = context;
+
+    // Kicked off before the dialog opens rather than from inside its builder:
+    // loadStates notifies its listeners synchronously, and doing that mid-build
+    // throws "setState() called during build" and leaves the dropdown stuck on
+    // "Loading..." because the failed notification never reaches it.
+    if (selectedCountryId != null &&
+        provider.states.isEmpty &&
+        !provider.isLoadingStates) {
+      provider.loadStates(selectedCountryId);
+    }
+
     showDialog(
       context: context,
       barrierDismissible: false,
+      // Consumer, not the captured read: the dialog is its own route, so
+      // without this it never rebuilds and the country/state lists stay on
+      // whatever they held the moment it opened.
       builder: (context) => StatefulBuilder(
-        builder: (context, setDialogState) {
-          if (selectedCountryId != null &&
-              provider.states.isEmpty &&
-              !provider.isLoadingStates) {
-            provider.loadStates(selectedCountryId!);
-          }
-
-          return AlertDialog(
-            backgroundColor: isDark ? Colors.grey[850] : Colors.white,
+        builder: (context, setDialogState) => Consumer<ProfileProvider>(
+          builder: (context, provider, _) {
+            return AlertDialog(
+            backgroundColor: isDark ? AppTheme.darkSurface : Colors.white,
             surfaceTintColor: Colors.transparent,
             shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(16),
+              borderRadius: BorderRadius.circular(20),
             ),
             title: Text(
               'Edit Address',
               style: TextStyle(
                 color: isDark ? Colors.white : Colors.black87,
-                fontWeight: FontWeight.w600,
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
               ),
             ),
             content: SingleChildScrollView(
@@ -489,135 +516,156 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    CustomTextField(
-                      controller: streetController,
-                      labelText: 'Street Address',
-                      hintText: 'Enter street address',
-                      isDark: isDark,
-                      validator: (value) =>
-                          value == null || value.trim().isEmpty
-                          ? 'This field is required'
-                          : null,
-                    ),
-                    const SizedBox(height: 16),
-                    CustomTextField(
-                      controller: street2Controller,
-                      labelText: 'Street Address 2',
-                      hintText: 'Apartment, suite, etc. (optional)',
-                      isDark: isDark,
-                    ),
-                    const SizedBox(height: 16),
-                    CustomTextField(
-                      controller: cityController,
-                      labelText: 'City',
-                      hintText: 'Enter city',
-                      isDark: isDark,
-                    ),
-                    const SizedBox(height: 16),
-                    CustomTextField(
-                      controller: zipController,
-                      labelText: 'ZIP Code',
-                      hintText: 'Enter ZIP code',
-                      isDark: isDark,
-                      keyboardType: TextInputType.number,
-                    ),
-                    const SizedBox(height: 16),
-                    _buildCountryDropdown(
-                      selectedCountryId: selectedCountryId,
-                      countries: provider.countries,
-                      isLoading: provider.isLoadingCountries,
-                      isDark: isDark,
-                      theme: theme,
-                      onChanged: (countryId) {
-                        setDialogState(() {
-                          selectedCountryId = countryId;
-                          selectedStateId = null;
-                        });
-                        if (countryId != null) {
-                          provider.loadStates(countryId);
-                        }
-                      },
-                    ),
-                    const SizedBox(height: 16),
-                    _buildStateDropdown(
-                      selectedStateId: selectedStateId,
-                      states: provider.states,
-                      isLoading: provider.isLoadingStates,
-                      isDark: isDark,
-                      theme: theme,
-                      enabled: selectedCountryId != null,
-                      onChanged: (stateId) {
-                        setDialogState(() => selectedStateId = stateId);
-                      },
-                    ),
+                    // Each input is offered only where the server defines the
+                    // field behind it, matching the rows on the screen itself.
+                    if (provider.isProfileFieldAvailable('street')) ...[
+                      CustomTextField(
+                        controller: streetController,
+                        labelText: 'Street Address',
+                        hintText: 'Enter street address',
+                        isDark: isDark,
+                        validator: (value) =>
+                            value == null || value.trim().isEmpty
+                            ? 'This field is required'
+                            : null,
+                      ),
+                      const SizedBox(height: 16),
+                    ],
+                    if (provider.isProfileFieldAvailable('street2')) ...[
+                      CustomTextField(
+                        controller: street2Controller,
+                        labelText: 'Street Address 2',
+                        hintText: 'Apartment, suite, etc. (optional)',
+                        isDark: isDark,
+                      ),
+                      const SizedBox(height: 16),
+                    ],
+                    if (provider.isProfileFieldAvailable('city')) ...[
+                      CustomTextField(
+                        controller: cityController,
+                        labelText: 'City',
+                        hintText: 'Enter city',
+                        isDark: isDark,
+                      ),
+                      const SizedBox(height: 16),
+                    ],
+                    if (provider.isProfileFieldAvailable('zip')) ...[
+                      CustomTextField(
+                        controller: zipController,
+                        labelText: 'ZIP Code',
+                        hintText: 'Enter ZIP code',
+                        isDark: isDark,
+                        keyboardType: TextInputType.number,
+                      ),
+                      const SizedBox(height: 16),
+                    ],
+                    if (provider.isProfileFieldAvailable('country_id')) ...[
+                      _buildCountryDropdown(
+                        selectedCountryId: selectedCountryId,
+                        countries: provider.countries,
+                        isLoading: provider.isLoadingCountries,
+                        isDark: isDark,
+                        theme: theme,
+                        onChanged: (countryId) {
+                          setDialogState(() {
+                            selectedCountryId = countryId;
+                            selectedStateId = null;
+                          });
+                          if (countryId != null) {
+                            provider.loadStates(countryId);
+                          }
+                        },
+                      ),
+                      const SizedBox(height: 16),
+                    ],
+                    if (provider.isProfileFieldAvailable('state_id'))
+                      _buildStateDropdown(
+                        selectedStateId: selectedStateId,
+                        states: provider.states,
+                        isLoading: provider.isLoadingStates,
+                        isDark: isDark,
+                        theme: theme,
+                        enabled: selectedCountryId != null,
+                        onChanged: (stateId) {
+                          setDialogState(() => selectedStateId = stateId);
+                        },
+                      ),
                   ],
                 ),
               ),
             ),
+            actionsPadding: const EdgeInsets.fromLTRB(24, 0, 24, 20),
             actions: [
-              TextButton(
-                onPressed: () {
-                  context.pop();
-                  streetController.dispose();
-                  street2Controller.dispose();
-                  cityController.dispose();
-                  zipController.dispose();
+              MoboButtonRow(
+                secondaryLabel: 'Cancel',
+                onSecondary: () {
+                  Navigator.pop(context);
+                  // pop() only starts the dialog's exit transition — these
+                  // fields stay mounted and animating for it, so disposing
+                  // their controllers here crashes them mid-fade. Deferred
+                  // past that, same as the Save handler below.
+                  _disposeAddressControllers([
+                    streetController,
+                    street2Controller,
+                    cityController,
+                    zipController,
+                  ]);
                 },
-                style: TextButton.styleFrom(
-                  foregroundColor: isDark ? Colors.grey[400] : Colors.grey[700],
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 12,
-                  ),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                ),
-                child: const Text(
-                  'Cancel',
-                  style: TextStyle(fontWeight: FontWeight.w500),
-                ),
-              ),
-              ElevatedButton(
-                onPressed: () async {
-                  if (streetController.text.trim().isEmpty) {
+                primaryLabel: 'Save',
+                onPrimary: () async {
+                  final hasStreet = provider.isProfileFieldAvailable('street');
+                  if (hasStreet && streetController.text.trim().isEmpty) {
                     CustomSnackbar.showError(
                       context,
                       'Street address is required',
                     );
                     return;
                   }
-                  final addressData = {
-                    'street': streetController.text.trim(),
-                    'street2': street2Controller.text.trim().isEmpty
-                        ? false
-                        : street2Controller.text.trim(),
-                    'city': cityController.text.trim().isEmpty
-                        ? false
-                        : cityController.text.trim(),
-                    'zip': zipController.text.trim().isEmpty
-                        ? false
-                        : zipController.text.trim(),
-                    'country_id': selectedCountryId ?? false,
-                    'state_id': selectedStateId ?? false,
+                  // The whole address is written as one payload, so a field
+                  // the server does not define has to be left out rather than
+                  // sent as false — Odoo rejects the entire write for one
+                  // unrecognized name.
+                  final addressData = <String, dynamic>{
+                    if (hasStreet) 'street': streetController.text.trim(),
+                    if (provider.isProfileFieldAvailable('street2'))
+                      'street2': street2Controller.text.trim().isEmpty
+                          ? false
+                          : street2Controller.text.trim(),
+                    if (provider.isProfileFieldAvailable('city'))
+                      'city': cityController.text.trim().isEmpty
+                          ? false
+                          : cityController.text.trim(),
+                    if (provider.isProfileFieldAvailable('zip'))
+                      'zip': zipController.text.trim().isEmpty
+                          ? false
+                          : zipController.text.trim(),
+                    if (provider.isProfileFieldAvailable('country_id'))
+                      'country_id': selectedCountryId ?? false,
+                    if (provider.isProfileFieldAvailable('state_id'))
+                      'state_id': selectedStateId ?? false,
                   };
 
-                  final navigator = Navigator.of(context);
+                  final navigator = Navigator.of(rootContext);
                   navigator.pop();
 
-                  streetController.dispose();
-                  street2Controller.dispose();
-                  cityController.dispose();
-                  zipController.dispose();
+                  // Same reason as Cancel: the dialog (and the CustomTextFields
+                  // reading these controllers) is still animating out, not
+                  // gone yet, so disposal has to wait for that to finish.
+                  _disposeAddressControllers([
+                    streetController,
+                    street2Controller,
+                    cityController,
+                    zipController,
+                  ]);
 
-                  _showLoadingDialog(context, 'Updating Address');
+                  _showLoadingDialog(rootContext, 'Updating Address');
                   try {
                     await provider.updateAddressFields(addressData);
                     if (mounted) {
                       _isShowingLoadingDialog = false;
                       navigator.pop();
                       CustomSnackbar.showSuccess(
-                        context,
+                        rootContext,
                         'Address updated successfully',
                       );
                     }
@@ -626,32 +674,17 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
                       _isShowingLoadingDialog = false;
                       navigator.pop();
                       CustomSnackbar.showError(
-                        context,
+                        rootContext,
                         'Failed to update address: $e',
                       );
                     }
                   }
                 },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: theme.primaryColor,
-                  foregroundColor: Colors.white,
-                  elevation: 0,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 24,
-                    vertical: 12,
-                  ),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                ),
-                child: const Text(
-                  'Save',
-                  style: TextStyle(fontWeight: FontWeight.w500),
-                ),
               ),
             ],
           );
-        },
+          },
+        ),
       ),
     );
   }
@@ -823,27 +856,27 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
         return StatefulBuilder(
           builder: (ctx, setDlg) {
             return AlertDialog(
-              backgroundColor: isDark ? Colors.grey[850] : Colors.white,
+              backgroundColor: isDark ? AppTheme.darkSurface : Colors.white,
               surfaceTintColor: Colors.transparent,
               shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
+                borderRadius: BorderRadius.circular(20),
               ),
               title: Text(
                 'Select Related Company',
-                style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+                style: TextStyle(
+                  color: isDark ? Colors.white : Colors.black87,
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
               content: SizedBox(
                 width: 420,
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    TextField(
+                    MoboSearchBar(
                       controller: searchCtrl,
-                      decoration: const InputDecoration(
-                        prefixIcon: Icon(Icons.search),
-                        hintText: 'Search companies...',
-                        isDense: true,
-                      ),
+                      hintText: 'Search companies...',
                       onChanged: (val) async {
                         setDlg(() => loading = true);
                         await loadCompanies(val);
@@ -908,7 +941,7 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
               ),
               actions: [
                 TextButton(
-                  onPressed: () => context.pop(),
+                  onPressed: () => Navigator.pop(context),
                   child: const Text('Cancel'),
                 ),
               ],
@@ -923,7 +956,7 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
           await provider.updateRelatedCompany(selected['id'] as int?);
           if (!mounted) return;
           _isShowingLoadingDialog = false;
-          context.pop();
+          Navigator.pop(context);
           setState(() {
             _relatedCompanyId = selected['id'] as int?;
             _relatedCompanyName = selected['name']?.toString();
@@ -932,7 +965,7 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
         } catch (e) {
           if (mounted) {
             _isShowingLoadingDialog = false;
-            context.pop();
+            Navigator.pop(context);
             CustomSnackbar.showError(
               context,
               'Failed to update related company: $e',
@@ -942,6 +975,159 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
       }
     });
   }
+
+  /// The profile rows this server can actually store, in display order.
+  ///
+  /// A field the connected Odoo does not define is left out entirely rather
+  /// than shown as an empty row: the row would offer an edit whose value the
+  /// write path has nowhere to put, so it would be dropped without an error.
+  /// Availability is unknown until the first fetch resolves it, and unknown
+  /// counts as present — see [ProfileProvider.isProfileFieldAvailable].
+  List<Widget> _buildProfileRows(
+    BuildContext context,
+    ProfileProvider provider,
+    Map<String, dynamic> userData,
+    bool isEditingDisabled,
+  ) {
+    final rows = <Widget>[];
+
+    // The gap belongs before each row, so a hidden row takes its spacing with
+    // it instead of leaving a double gap behind.
+    void add(String field, Widget Function() row, {double gap = 16}) {
+      if (!provider.isProfileFieldAvailable(field)) return;
+      if (rows.isNotEmpty) rows.add(SizedBox(height: gap));
+      rows.add(row());
+    }
+
+    add(
+      'name',
+      () => _buildCustomTextField(
+        context,
+        'Full Name',
+        userData['name']?.toString(),
+        HugeIcons.strokeRoundedUserAccount,
+        disabled: isEditingDisabled,
+        controller: _nameController,
+      ),
+    );
+    add(
+      'email',
+      () => _buildCustomTextField(
+        context,
+        'Email',
+        userData['email']?.toString(),
+        HugeIcons.strokeRoundedMail01,
+        disabled: isEditingDisabled,
+        controller: _emailController,
+        keyboardType: TextInputType.emailAddress,
+      ),
+    );
+    add(
+      'phone',
+      () => _buildCustomTextField(
+        context,
+        'Phone',
+        userData['phone']?.toString(),
+        HugeIcons.strokeRoundedCall02,
+        disabled: isEditingDisabled,
+        controller: _phoneController,
+        keyboardType: TextInputType.phone,
+      ),
+    );
+    add(
+      'mobile',
+      () => _buildCustomTextField(
+        context,
+        'Mobile',
+        userData['mobile']?.toString(),
+        HugeIcons.strokeRoundedSmartPhone01,
+        disabled: isEditingDisabled,
+        controller: _mobileController,
+        keyboardType: TextInputType.phone,
+      ),
+    );
+    add(
+      'website',
+      () => _buildCustomTextField(
+        context,
+        'Website',
+        userData['website']?.toString(),
+        HugeIcons.strokeRoundedWebDesign02,
+        disabled: isEditingDisabled,
+        controller: _websiteController,
+        keyboardType: TextInputType.url,
+      ),
+    );
+    add(
+      'function',
+      () => _buildCustomTextField(
+        context,
+        'Job Title',
+        userData['function']?.toString(),
+        HugeIcons.strokeRoundedWorkHistory,
+        disabled: isEditingDisabled,
+        controller: _functionController,
+      ),
+    );
+    add(
+      'company_id',
+      () => _buildCustomTextField(
+        context,
+        'Company',
+        userData['company_id'] is List && userData['company_id'].length > 1
+            ? (userData['company_id'][1]?.toString() ?? '')
+            : '',
+        HugeIcons.strokeRoundedBuilding05,
+        disabled: isEditingDisabled,
+        showNonEditableMessage: true,
+      ),
+    );
+    add(
+      'parent_id',
+      () => _buildCustomTextField(
+        context,
+        'Related Company',
+        (_relatedCompanyName ?? ''),
+        HugeIcons.strokeRoundedBuilding01,
+        disabled: isEditingDisabled,
+        onEdit: _isEditMode && !isEditingDisabled
+            ? _showRelatedCompanyPicker
+            : null,
+      ),
+    );
+
+    // The Address row stands for six separate partner fields, so it earns its
+    // place as long as the server still defines at least one of them.
+    if (_availableAddressFields(provider).isNotEmpty) {
+      if (rows.isNotEmpty) rows.add(const SizedBox(height: 20));
+      rows.add(
+        _buildCustomTextField(
+          context,
+          'Address',
+          provider.formatAddress(userData),
+          HugeIcons.strokeRoundedLocation05,
+          onEdit: _isEditMode && !isEditingDisabled
+              ? _showEditAddressDialog
+              : null,
+          disabled: isEditingDisabled,
+        ),
+      );
+    }
+
+    return rows;
+  }
+
+  static const List<String> _addressFields = [
+    'street',
+    'street2',
+    'city',
+    'zip',
+    'state_id',
+    'country_id',
+  ];
+
+  List<String> _availableAddressFields(ProfileProvider provider) =>
+      _addressFields.where(provider.isProfileFieldAvailable).toList();
 
   Widget _buildCustomTextField(
     BuildContext context,
@@ -968,9 +1154,6 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
         Text(
           labelText,
           style: TextStyle(
-            fontFamily: GoogleFonts.manrope(
-              fontWeight: FontWeight.w400,
-            ).fontFamily,
             color: isDark ? Colors.white70 : const Color(0xff7F7F7F),
           ),
         ),
@@ -1028,9 +1211,9 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
           child: Row(
             children: [
-              Icon(
-                icon,
-                color: isDark ? Colors.white70 : Colors.black,
+              HugeIcon(
+                icon: icon,
+                color: isDark ? Colors.white70 : Colors.black45,
                 size: 20,
               ),
               const SizedBox(width: 12),
@@ -1038,14 +1221,11 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
                 child: Text(
                   displayValue,
                   style: TextStyle(
-                    fontFamily: GoogleFonts.manrope(
-                      fontWeight: FontWeight.w600,
-                    ).fontFamily,
                     color: displayValue == 'Not set'
-                        ? (isDark ? Colors.grey[500] : Colors.grey[500])
+                        ? Colors.grey[500]
                         : (isDark ? Colors.white70 : const Color(0xff000000)),
                     fontStyle: displayValue == 'Not set'
-                        ? FontStyle.normal
+                        ? FontStyle.italic
                         : FontStyle.normal,
                     fontSize: 14,
                     height: 1.2,
@@ -1068,9 +1248,12 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
     bool isDark,
   ) {
     return Focus(
-      child: Builder(
-        builder: (context) {
+      child: ValueListenableBuilder<TextEditingValue>(
+        valueListenable: controller,
+        builder: (context, value, _) {
           final hasFocus = Focus.of(context).hasFocus;
+          final hasError =
+              _getValidatorForField(labelText)?.call(value.text) != null;
           return Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -1081,7 +1264,9 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
                       ? const Color(0xFF2A2A2A)
                       : const Color(0xffF8FAFB),
                   border: Border.all(
-                    color: hasFocus
+                    color: hasError
+                        ? StatusColors.red
+                        : hasFocus
                         ? Theme.of(context).primaryColor
                         : Colors.transparent,
                     width: 1,
@@ -1094,9 +1279,13 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
                   ),
                   child: Row(
                     children: [
-                      Icon(
-                        _getIconForField(labelText),
-                        color: isDark ? Colors.white70 : Colors.black,
+                      HugeIcon(
+                        icon: _getIconForField(labelText),
+                        color: hasFocus
+                            ? Theme.of(context).primaryColor
+                            : (isDark
+                                  ? Colors.white70
+                                  : const Color(0xff7F7F7F)),
                         size: 20,
                       ),
                       const SizedBox(width: 12),
@@ -1107,9 +1296,6 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
                           validator: _getValidatorForField(labelText),
                           autovalidateMode: AutovalidateMode.onUserInteraction,
                           style: TextStyle(
-                            fontFamily: GoogleFonts.manrope(
-                              fontWeight: FontWeight.w600,
-                            ).fontFamily,
                             color: isDark
                                 ? Colors.white70
                                 : const Color(0xff000000),
@@ -1127,12 +1313,7 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
                                 ? 'Enter $labelText'
                                 : null,
                             hintStyle: TextStyle(
-                              fontFamily: GoogleFonts.manrope(
-                                fontWeight: FontWeight.w600,
-                              ).fontFamily,
-                              color: isDark
-                                  ? Colors.grey[500]
-                                  : Colors.grey[500],
+                              color: Colors.grey[500],
                               fontStyle: FontStyle.italic,
                               fontSize: 14,
                               height: 1.2,
@@ -1220,7 +1401,7 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
           child: Text(
             errorMessage,
             style: TextStyle(
-              color: Colors.red[400],
+              color: StatusColors.red,
               fontSize: 12,
               fontWeight: FontWeight.w400,
             ),
@@ -1274,7 +1455,7 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
                     ),
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.black.withOpacity(0.1),
+                        color: Colors.black.withValues(alpha: 0.08),
                         blurRadius: 16,
                         offset: const Offset(0, 6),
                         spreadRadius: 2,
@@ -1285,7 +1466,7 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
                 ),
                 if (_isEditMode && !isEditingDisabled)
                   Positioned(
-                    bottom: 8,
+                    bottom: 2,
                     right: 8,
                     child: InkWell(
                       onTap: _showImageSourceActionSheet,
@@ -1300,16 +1481,9 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
                             color: isDark ? Colors.grey[900]! : Colors.white,
                             width: 3,
                           ),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withOpacity(0.2),
-                              blurRadius: 8,
-                              offset: const Offset(0, 2),
-                            ),
-                          ],
                         ),
-                        child: const Icon(
-                          HugeIcons.strokeRoundedCamera02,
+                        child: const HugeIcon(
+                          icon: HugeIcons.strokeRoundedCamera02,
                           color: Colors.white,
                           size: 18,
                         ),
@@ -1364,51 +1538,18 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
             style: TextStyle(
               fontWeight: FontWeight.bold,
               color: isDark ? Colors.white : Colors.black,
-              fontSize: _rs(context, 18),
             ),
           ),
           leading: IconButton(
             onPressed: () async {
               await _handleBack();
             },
-            icon: Icon(
-              HugeIcons.strokeRoundedArrowLeft01,
+            icon: HugeIcon(
+              icon: HugeIcons.strokeRoundedArrowLeft01,
               color: isDark ? Colors.white : Colors.black,
             ),
           ),
           actions: [
-            Consumer<ProfileProvider>(
-              builder: (context, provider, _) {
-                if (!provider.hasPendingUpdates) return const SizedBox.shrink();
-                final enabled = provider.hasInternet;
-                return TextButton(
-                  onPressed: enabled
-                      ? () async {
-                          await provider.processPendingUpdates();
-                          if (mounted) {
-                            CustomSnackbar.showSuccess(
-                              context,
-                              'Synced pending changes',
-                            );
-                          }
-                        }
-                      : null,
-                  child: Text(
-                    'Sync',
-                    style: TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w600,
-                      letterSpacing: 0.2,
-                      color: enabled
-                          ? (isDark
-                                ? Colors.white
-                                : Theme.of(context).primaryColor)
-                          : (isDark ? Colors.white24 : Colors.black26),
-                    ),
-                  ),
-                );
-              },
-            ),
             if (_isEditMode)
               Padding(
                 padding: const EdgeInsets.only(right: 8.0),
@@ -1417,16 +1558,15 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
                   child: Text(
                     'Cancel',
                     style: TextStyle(
-                      fontSize: 15,
+                      fontSize: 16,
                       fontWeight: FontWeight.w500,
-                      letterSpacing: 0.2,
                       color: isDark ? Colors.grey[400] : Colors.grey[600],
                     ),
                   ),
                 ),
               ),
             Padding(
-              padding: const EdgeInsets.only(right: 0.0),
+              padding: const EdgeInsets.only(right: 8.0),
               child: TextButton(
                 onPressed: isEditingDisabled || _isSaving
                     ? null
@@ -1434,6 +1574,14 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
                         if (_isEditMode) {
                           _saveAllChanges();
                         } else {
+                          // Seeded from the profile as it is *now*, not as
+                          // it was when the screen opened: that was the
+                          // cached copy, painted before the live fetch
+                          // landed, and phone/mobile in particular resolve
+                          // to different values once the server answers.
+                          // Without this, Edit showed the stale numbers the
+                          // rows had already moved on from.
+                          _updateControllers();
                           setState(() {
                             _isEditMode = true;
                           });
@@ -1442,13 +1590,10 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
                 child: Text(
                   _isEditMode ? 'Save' : 'Edit',
                   style: TextStyle(
-                    fontSize: 15,
+                    fontSize: 16,
                     fontWeight: FontWeight.w600,
-                    letterSpacing: 0.2,
                     color: _isEditMode
                         ? (isDark ? Colors.white : Colors.black)
-                        : isDark
-                        ? Colors.white
                         : Theme.of(context).primaryColor,
                   ),
                 ),
@@ -1456,6 +1601,9 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
             ),
           ],
           backgroundColor: isDark ? Colors.grey[900]! : Colors.white,
+          systemOverlayStyle: isDark
+              ? SystemUiOverlayStyle.light
+              : SystemUiOverlayStyle.dark,
         ),
         backgroundColor: isDark ? Colors.grey[900]! : Colors.white,
         body: Consumer<ProfileProvider>(
@@ -1482,7 +1630,7 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
                         const SizedBox(height: 12),
                         OutlinedButton(
                           onPressed: () =>
-                              provider.fetchUserProfile(forceRefresh: true),
+                              provider.fetchUserProfile(),
                           child: const Text('Retry'),
                         ),
                       ],
@@ -1502,7 +1650,7 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
 
             final userData = provider.userData!;
             return RefreshIndicator(
-              onRefresh: () => provider.fetchUserProfile(forceRefresh: true),
+              onRefresh: () => provider.fetchUserProfile(),
               child: SingleChildScrollView(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.end,
@@ -1515,12 +1663,12 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
                           decoration: BoxDecoration(
                             color: isDark
                                 ? const Color(0xFF2A2A2A)
-                                : const Color(0xFFFFF3CD),
-                            borderRadius: BorderRadius.circular(10),
+                                : StatusColors.orange.withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(12),
                             border: Border.all(
                               color: isDark
                                   ? Colors.white12
-                                  : const Color(0xFFFFEEBA),
+                                  : StatusColors.orange.withValues(alpha: 0.3),
                             ),
                           ),
                           child: Row(
@@ -1530,17 +1678,17 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
                                 size: 18,
                                 color: isDark
                                     ? Colors.white70
-                                    : const Color(0xFF856404),
+                                    : StatusColors.orange,
                               ),
                               const SizedBox(width: 8),
                               Expanded(
                                 child: Text(
-                                  'You are offline. Changes will be saved locally and auto-synced when you reconnect.',
+                                  'You are offline. Reconnect to save changes.',
                                   style: TextStyle(
                                     fontSize: 12.5,
                                     color: isDark
                                         ? Colors.white70
-                                        : const Color(0xFF856404),
+                                        : Colors.black87,
                                   ),
                                 ),
                               ),
@@ -1570,100 +1718,11 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
                               ),
                             ),
                             const SizedBox(height: 20),
-                            _buildCustomTextField(
+                            ..._buildProfileRows(
                               context,
-                              'Full Name',
-                              userData['name']?.toString(),
-                              HugeIcons.strokeRoundedUserAccount,
-                              disabled: isEditingDisabled,
-                              controller: _nameController,
-                            ),
-                            const SizedBox(height: 16),
-                            _buildCustomTextField(
-                              context,
-                              'Email',
-                              (userData['email'] ?? userData['email'])
-                                  ?.toString(),
-                              HugeIcons.strokeRoundedMail01,
-                              disabled: isEditingDisabled,
-                              controller: _emailController,
-                              keyboardType: TextInputType.emailAddress,
-                              showNonEditableMessage: false,
-                            ),
-                            const SizedBox(height: 16),
-                            _buildCustomTextField(
-                              context,
-                              'Phone',
-                              userData['phone']?.toString(),
-                              HugeIcons.strokeRoundedCall02,
-                              disabled: isEditingDisabled,
-                              controller: _phoneController,
-                              keyboardType: TextInputType.phone,
-                            ),
-                            const SizedBox(height: 16),
-                            _buildCustomTextField(
-                              context,
-                              'Mobile',
-                              userData['mobile']?.toString(),
-                              HugeIcons.strokeRoundedSmartPhone01,
-                              disabled: isEditingDisabled,
-                              controller: _mobileController,
-                              keyboardType: TextInputType.phone,
-                            ),
-                            const SizedBox(height: 16),
-                            _buildCustomTextField(
-                              context,
-                              'Website',
-                              userData['website']?.toString(),
-                              HugeIcons.strokeRoundedWebDesign02,
-                              disabled: isEditingDisabled,
-                              controller: _websiteController,
-                              keyboardType: TextInputType.url,
-                            ),
-                            const SizedBox(height: 16),
-                            _buildCustomTextField(
-                              context,
-                              'Job Title',
-                              userData['function']?.toString(),
-                              HugeIcons.strokeRoundedWorkHistory,
-                              disabled: isEditingDisabled,
-                              controller: _functionController,
-                            ),
-                            const SizedBox(height: 16),
-                            _buildCustomTextField(
-                              context,
-                              'Company',
-                              userData['company_id'] is List &&
-                                      userData['company_id'].length > 1
-                                  ? (userData['company_id'][1]?.toString() ??
-                                        '')
-                                  : '',
-                              HugeIcons.strokeRoundedBuilding05,
-                              disabled: isEditingDisabled,
-                              showNonEditableMessage: true,
-                            ),
-                            const SizedBox(height: 16),
-                            _buildCustomTextField(
-                              context,
-                              'Related Company',
-                              (_relatedCompanyName ?? ''),
-                              HugeIcons.strokeRoundedBuilding01,
-                              disabled: isEditingDisabled,
-                              onEdit: _isEditMode && !isEditingDisabled
-                                  ? _showRelatedCompanyPicker
-                                  : null,
-                              showNonEditableMessage: false,
-                            ),
-                            const SizedBox(height: 20),
-                            _buildCustomTextField(
-                              context,
-                              'Address',
-                              provider.formatAddress(userData),
-                              HugeIcons.strokeRoundedLocation05,
-                              onEdit: _isEditMode && !isEditingDisabled
-                                  ? _showEditAddressDialog
-                                  : null,
-                              disabled: isEditingDisabled,
+                              provider,
+                              userData,
+                              isEditingDisabled,
                             ),
                             const SizedBox(height: 32),
                           ],

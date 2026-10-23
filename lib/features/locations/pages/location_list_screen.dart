@@ -7,12 +7,15 @@ import '../../../shared/widgets/loaders/list_shimmer.dart';
 import '../../../shared/widgets/pagination/pagination_controls.dart';
 import '../providers/location_provider.dart';
 import '../widgets/location_list_tile.dart';
-import '../widgets/location_filter_bottom_sheet.dart';
 import '../widgets/location_group_tile.dart';
 import '../models/location_model.dart';
 import '../../../shared/widgets/empty_state.dart';
+import '../../../core/services/error_manager.dart';
 import '../../../shared/widgets/filters/active_filters_badge.dart';
 import '../../../shared/widgets/filters/group_by_pill.dart';
+import '../../../shared/widgets/filters/premium_filter_bottom_sheet.dart';
+import '../../../shared/widgets/layout/collapsible_header_layout.dart';
+import '../../../shared/widgets/search/mobo_search_filter_bar.dart';
 
 /// A screen displaying a hierarchical list of stock locations.
 ///
@@ -38,7 +41,6 @@ class LocationListScreen extends StatefulWidget {
 
 class _LocationListScreenState extends State<LocationListScreen> {
   final TextEditingController _searchController = TextEditingController();
-  final ScrollController _scrollController = ScrollController();
   Timer? _debounce;
 
   @override
@@ -59,7 +61,6 @@ class _LocationListScreenState extends State<LocationListScreen> {
     _debounce?.cancel();
     _searchController.removeListener(_onSearchChanged);
     _searchController.dispose();
-    _scrollController.dispose();
     super.dispose();
   }
 
@@ -74,6 +75,13 @@ class _LocationListScreenState extends State<LocationListScreen> {
 
   Future<void> _onRefresh() async {
     await context.read<LocationProvider>().refresh();
+  }
+
+  void _clearAllFilters() {
+    _searchController.clear();
+    final provider = context.read<LocationProvider>();
+    provider.clearFilters();
+    provider.fetchLocations(forceRefresh: true);
   }
 
   @override
@@ -103,229 +111,245 @@ class _LocationListScreenState extends State<LocationListScreen> {
                 ),
               ),
             ),
-      body: Column(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(16),
-            color: theme.scaffoldBackgroundColor,
-            child: TextField(
-              controller: _searchController,
-              decoration: InputDecoration(
-                hintText: 'Search locations...',
-                prefixIcon: IconButton(
-                  icon: Icon(
-                    HugeIcons.strokeRoundedFilterHorizontal,
-                    color: isDark ? Colors.grey[400] : Colors.grey[600],
-                    size: 18,
-                  ),
-                  onPressed: _showFilters,
-                  tooltip: 'Filter & Group By',
-                ),
-                suffixIcon: _searchController.text.isNotEmpty
-                    ? IconButton(
-                        icon: Icon(
-                          Icons.clear,
-                          color: isDark ? Colors.grey[400] : Colors.grey,
-                          size: 20,
-                        ),
-                        onPressed: () => _searchController.clear(),
-                      )
-                    : null,
-                filled: true,
-                fillColor: isDark ? Colors.grey[850] : Colors.white,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide.none,
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide(color: theme.primaryColor),
-                ),
-                contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 12,
-                ),
-                isDense: true,
+      body: CollapsibleHeaderLayout(
+        header: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(16),
+              color: theme.scaffoldBackgroundColor,
+              child: Consumer<LocationProvider>(
+                builder: (_, provider, __) {
+                  return MoboSearchFilterBar(
+                    controller: _searchController,
+                    hintText: 'Search locations...',
+                    hasActiveFilter: _activeFilterCount(provider) > 0,
+                    onFilterTap: _showFilterBottomSheet,
+                    onChanged: (_) => setState(() {}),
+                  );
+                },
               ),
-              onSubmitted: (value) {
-                _debounce?.cancel();
-                context.read<LocationProvider>().fetchLocations(
-                  searchQuery: value.trim(),
+            ),
+
+            Consumer<LocationProvider>(
+              builder: (_, provider, __) {
+                return Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Expanded(
+                        child: SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              _buildActiveFiltersBadge(provider, theme),
+                              if (provider.selectedGroupBy != null) ...[
+                                const SizedBox(width: 8),
+                                _buildGroupByPill(
+                                  theme,
+                                  provider.selectedGroupBy,
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                      ),
+                      if (provider.totalCount > 0 &&
+                          provider.locations.isNotEmpty)
+                        PaginationControls(
+                          canGoToPreviousPage: provider.canGoToPreviousPage,
+                          canGoToNextPage: provider.canGoToNextPage,
+                          onPreviousPage: provider.goToPreviousPage,
+                          onNextPage: provider.goToNextPage,
+                          paginationText: provider.getPaginationText(),
+                          isDark: isDark,
+                          theme: theme,
+                        ),
+                    ],
+                  ),
                 );
               },
             ),
-          ),
+          ],
+        ),
 
-          Consumer<LocationProvider>(
-            builder: (_, provider, __) {
-              return Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Expanded(
-                      child: SingleChildScrollView(
-                        scrollDirection: Axis.horizontal,
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            _buildActiveFiltersBadge(provider, theme),
-                            if (provider.selectedGroupBy != null) ...[
-                              const SizedBox(width: 8),
-                              _buildGroupByPill(
-                                theme,
-                                provider.selectedGroupBy,
-                              ),
-                            ],
-                          ],
-                        ),
-                      ),
-                    ),
-                    if (provider.totalCount > 0 &&
-                        provider.locations.isNotEmpty)
-                      PaginationControls(
-                        canGoToPreviousPage: provider.canGoToPreviousPage,
-                        canGoToNextPage: provider.canGoToNextPage,
-                        onPreviousPage: provider.goToPreviousPage,
-                        onNextPage: provider.goToNextPage,
-                        paginationText: provider.getPaginationText(),
-                        isDark: isDark,
-                        theme: theme,
-                      ),
-                  ],
+        body: Consumer<LocationProvider>(
+          builder: (_, provider, __) {
+            if (provider.isLoading && provider.locations.isEmpty) {
+              return ListShimmer.buildListShimmer(
+                context,
+                itemCount: 8,
+                type: ShimmerType.standard,
+              );
+            }
+
+            if (provider.error != null && provider.locations.isEmpty) {
+              final info = ErrorManager.analyzeError(provider.error!);
+              final lottiePath = info.type == ErrorType.moduleNotInstalled
+                  ? 'assets/lotties/socialv no data.json'
+                  : 'assets/lotties/Error 404.json';
+
+              return EmptyState(
+                title: info.title,
+                subtitle: info.message,
+                lottieAsset: lottiePath,
+                actionLabel: 'Retry',
+                onAction: _onRefresh,
+              );
+            }
+
+            if (provider.locations.isEmpty) {
+              final hasActiveFilters =
+                  _activeFilterCount(provider) > 0 ||
+                  provider.selectedGroupBy != null;
+              return ListView(
+                children: [
+                  const SizedBox(height: 48),
+                  EmptyState(
+                    title: 'No locations found',
+                    subtitle: hasActiveFilters
+                        ? 'Try adjusting your filters'
+                        : 'Locations will appear here',
+                    lottieAsset: 'assets/lotties/empty ghost.json',
+                    actionLabel: hasActiveFilters
+                        ? 'Clear All Filters'
+                        : 'Refresh',
+                    onAction: hasActiveFilters ? _clearAllFilters : _onRefresh,
+                  ),
+                ],
+              );
+            }
+
+            final groupBy = provider.selectedGroupBy;
+
+            if (groupBy == null) {
+              return RefreshIndicator(
+                onRefresh: _onRefresh,
+                child: ListView.builder(
+                  padding: const EdgeInsets.all(16),
+                  itemCount: provider.locations.length,
+                  itemBuilder: (context, index) {
+                    final loc = provider.locations[index];
+                    return LocationListTile(
+                      key: ValueKey(loc.id),
+                      location: loc,
+                      isDark: isDark,
+                    );
+                  },
                 ),
               );
-            },
-          ),
+            }
 
-          Expanded(
-            child: Consumer<LocationProvider>(
-              builder: (_, provider, __) {
-                if (provider.isLoading && provider.locations.isEmpty) {
-                  return ListShimmer.buildListShimmer(
-                    context,
-                    itemCount: 8,
-                    type: ShimmerType.standard,
+            final groups = _buildGroups(provider.locations, groupBy);
+            final keys = groups.keys.toList()..sort();
+            return RefreshIndicator(
+              onRefresh: _onRefresh,
+              child: ListView.builder(
+                padding: const EdgeInsets.all(16),
+                itemCount: keys.length,
+                itemBuilder: (context, index) {
+                  final key = keys[index];
+                  final items = groups[key]!;
+                  return LocationGroupTile(
+                    groupKey: key,
+                    count: items.length,
+                    items: items,
+                    isDark: isDark,
+                    theme: theme,
                   );
-                }
-
-                if (provider.error != null && provider.locations.isEmpty) {
-                  final err = provider.error!.toLowerCase();
-
-                  final isModuleNotInstalled =
-                      err.contains('module') && err.contains('not installed');
-                  final title = isModuleNotInstalled
-                      ? 'Feature unavailable'
-                      : 'Something went wrong';
-                  final subtitle = isModuleNotInstalled
-                      ? 'This module is not installed on your server. Please contact your administrator.'
-                      : 'Pull to refresh or tap retry';
-                  final lottiePath = isModuleNotInstalled
-                      ? 'assets/lotties/socialv no data.json'
-                      : 'assets/lotties/Error 404.json';
-
-                  return RefreshIndicator(
-                    onRefresh: _onRefresh,
-                    child: ListView(
-                      children: [
-                        const SizedBox(height: 48),
-                        EmptyState(
-                          title: title,
-                          subtitle: subtitle,
-                          lottieAsset: lottiePath,
-                          actionLabel: 'Retry',
-                          onAction: _onRefresh,
-                        ),
-                      ],
-                    ),
-                  );
-                }
-
-                if (provider.locations.isEmpty) {
-                  final hasSearch = _searchController.text.trim().isNotEmpty;
-                  return ListView(
-                    children: [
-                      const SizedBox(height: 48),
-                      EmptyState(
-                        title: 'No locations found',
-                        subtitle: hasSearch
-                            ? 'Try adjusting your search'
-                            : 'Locations will appear here',
-                        lottieAsset: 'assets/lotties/empty ghost.json',
-                        actionLabel: hasSearch ? 'Clear Search' : 'Refresh',
-                        onAction: hasSearch
-                            ? () {
-                                _searchController.clear();
-                                provider.fetchLocations(searchQuery: '');
-                              }
-                            : _onRefresh,
-                      ),
-                    ],
-                  );
-                }
-
-                final groupBy = provider.selectedGroupBy;
-
-                if (groupBy == null) {
-                  return RefreshIndicator(
-                    onRefresh: _onRefresh,
-                    child: ListView.builder(
-                      controller: _scrollController,
-                      padding: const EdgeInsets.all(16),
-                      itemCount: provider.locations.length,
-                      itemBuilder: (context, index) {
-                        final loc = provider.locations[index];
-                        return LocationListTile(
-                          key: ValueKey(loc.id),
-                          location: loc,
-                          isDark: isDark,
-                          onTap: () {},
-                        );
-                      },
-                    ),
-                  );
-                }
-
-                final groups = _buildGroups(provider.locations, groupBy);
-                final keys = groups.keys.toList()..sort();
-                return RefreshIndicator(
-                  onRefresh: _onRefresh,
-                  child: ListView.builder(
-                    controller: _scrollController,
-                    padding: const EdgeInsets.all(16),
-                    itemCount: keys.length,
-                    itemBuilder: (context, index) {
-                      final key = keys[index];
-                      final items = groups[key]!;
-                      return LocationGroupTile(
-                        groupKey: key,
-                        count: items.length,
-                        items: items,
-                        isDark: isDark,
-                        theme: theme,
-                      );
-                    },
-                  ),
-                );
-              },
-            ),
-          ),
-        ],
+                },
+              ),
+            );
+          },
+        ),
       ),
     );
   }
 
-  void _showFilters() {
+  static String _snake(String s) => s.toLowerCase().replaceAll(' ', '_');
+
+  void _showFilterBottomSheet() {
     final provider = context.read<LocationProvider>();
-    showModalBottomSheet(
+
+    const usages = <String>[
+      'internal',
+      'view',
+      'customer',
+      'supplier',
+      'inventory',
+      'production',
+      'transit',
+    ];
+
+    final usageGroup = FilterGroup(
+      title: 'Location Usage',
+      options: usages
+          .map(
+            (u) => FilterOption(
+              title: u[0].toUpperCase() + u.substring(1),
+              value: provider.usage == u,
+            ),
+          )
+          .toList(),
+    );
+
+    final groupByGroup = FilterGroup(
+      title: 'Group By',
+      options: [
+        FilterOption(
+          title: 'Usage',
+          subtitle: 'Group by location type',
+          value: provider.selectedGroupBy == 'usage',
+        ),
+        FilterOption(
+          title: 'Parent',
+          subtitle: 'Group by parent location',
+          value: provider.selectedGroupBy == 'parent',
+        ),
+        FilterOption(
+          title: 'Name (A-Z)',
+          subtitle: 'Group by first letter of name',
+          value: provider.selectedGroupBy == 'name:letter',
+        ),
+      ],
+    );
+
+    PremiumFilterBottomSheet.show(
       context: context,
-      isScrollControlled: true,
-      useRootNavigator: true,
-      backgroundColor: Colors.transparent,
-      builder: (_) => LocationFilterBottomSheet(
-        provider: provider,
-        onClearSearch: () => _searchController.clear(),
-      ),
+      title: 'Filter & Group By',
+      filterGroups: [usageGroup],
+      groupByOptions: [groupByGroup],
+      onApply: (values) {
+        // `usage` is single-select in the old UI (a tap on a chip just
+        // selected that usage; there was no way to deselect). The shared
+        // widget renders these as independent checkboxes, so if more than
+        // one somehow comes back true we take the first match, and if
+        // none are true we fall back to the default 'internal' usage —
+        // mirroring the old widget's exclusivity behaviour.
+        String? selectedUsage;
+        for (final u in usages) {
+          final title = u[0].toUpperCase() + u.substring(1);
+          if (values['location_usage_${_snake(title)}'] == true) {
+            selectedUsage = u;
+            break;
+          }
+        }
+        selectedUsage ??= 'internal';
+
+        String? groupBy;
+        if (values['group_by_usage'] == true) {
+          groupBy = 'usage';
+        } else if (values['group_by_parent'] == true) {
+          groupBy = 'parent';
+        } else if (values['group_by_name_(a-z)'] == true) {
+          groupBy = 'name:letter';
+        }
+
+        provider.setGroupBy(groupBy);
+        provider.fetchLocations(usage: selectedUsage, forceRefresh: true);
+      },
     );
   }
 
@@ -348,14 +372,18 @@ class _LocationListScreenState extends State<LocationListScreen> {
     return GroupByPill(label: label, theme: theme);
   }
 
-  Widget _buildActiveFiltersBadge(LocationProvider provider, ThemeData theme) {
+  int _activeFilterCount(LocationProvider provider) {
     int count = 0;
     if (provider.usage.isNotEmpty && provider.usage != 'internal') count++;
     if (provider.parentId != null) count++;
     if (_searchController.text.trim().isNotEmpty) count++;
+    return count;
+  }
+
+  Widget _buildActiveFiltersBadge(LocationProvider provider, ThemeData theme) {
     final hasGroupBy = provider.selectedGroupBy != null;
     return ActiveFiltersBadge(
-      count: count,
+      count: _activeFilterCount(provider),
       theme: theme,
       hasGroupBy: hasGroupBy,
     );

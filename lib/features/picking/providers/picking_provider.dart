@@ -7,8 +7,25 @@ class PickingProvider extends ChangeNotifier {
   final PickingService _service;
   final String pickingTypeCode;
 
-  PickingProvider({required this.pickingTypeCode, PickingService? service})
-    : _service = service ?? PickingService();
+  /// The Status filter the list opens with, e.g.
+  /// [PickingService.toProcessStates] for a dashboard card's list, so the
+  /// list's total is the number the card showed. The user can still change
+  /// or clear it.
+  final List<String> initialStates;
+
+  /// Names this list's offline cache; defaults to [pickingTypeCode]. Two
+  /// lists of one operation type (PoS Orders, Delivery Orders) need their
+  /// own.
+  final String cacheName;
+
+  PickingProvider({
+    required this.pickingTypeCode,
+    this.initialStates = const [],
+    PickingService? service,
+    String? cacheName,
+  }) : _service = service ?? PickingService(),
+       cacheName = cacheName ?? pickingTypeCode,
+       _states = List<String>.of(initialStates);
 
   bool _isLoading = false;
   String? _error;
@@ -20,13 +37,15 @@ class PickingProvider extends ChangeNotifier {
   final int _pageSize = 20;
 
   String _searchQuery = '';
-  List<String> _states = [];
+  List<String> _states;
   DateTime? _startDate;
   DateTime? _endDate;
   String? _selectedGroupBy;
 
   Map<String, int> _groupSummary = {};
   final Map<String, List<Picking>> _loadedGroups = {};
+  // Group label -> the Odoo domain that selects that group's pickings.
+  final Map<String, List<dynamic>> _groupDomains = {};
 
   bool get isLoading => _isLoading;
   String? get error => _error;
@@ -55,9 +74,27 @@ class PickingProvider extends ChangeNotifier {
   Map<String, int> get groupSummary => _groupSummary;
   Map<String, List<Picking>> get loadedGroups => _loadedGroups;
 
+  /// The offline cache holds only the list's default view (no search or
+  /// dates, Status filter as opened). A list that opens filtered keeps its
+  /// own cache, so it never flashes the unfiltered rows — and their count —
+  /// before the real fetch lands.
+  String get _cacheScope => initialStates.isEmpty
+      ? cacheName
+      : '${cacheName}_${initialStates.join('_')}';
+
+  bool _isInitialStates(List<String> states) =>
+      states.length == initialStates.length &&
+      states.toSet().containsAll(initialStates);
+
+  bool get _isDefaultView =>
+      _searchQuery.isEmpty &&
+      _startDate == null &&
+      _endDate == null &&
+      _isInitialStates(_states);
+
   Future<void> loadCachedPickings() async {
     try {
-      final cached = await _service.loadCachedPickings(pickingTypeCode);
+      final cached = await _service.loadCachedPickings(_cacheScope);
       if (cached.isNotEmpty) {
         _items = cached;
         _totalCount = cached.length;
@@ -84,8 +121,8 @@ class PickingProvider extends ChangeNotifier {
 
     if (!forceRefresh &&
         _items.isEmpty &&
-        (searchQuery == null || searchQuery.isEmpty) &&
-        (states == null || states.isEmpty) &&
+        (searchQuery ?? _searchQuery).isEmpty &&
+        _isInitialStates(states ?? _states) &&
         startDate == null &&
         endDate == null) {
       await loadCachedPickings();
@@ -124,11 +161,8 @@ class PickingProvider extends ChangeNotifier {
       _items = items;
       _totalCount = count;
 
-      if (_searchQuery.isEmpty &&
-          _states.isEmpty &&
-          _startDate == null &&
-          _endDate == null) {
-        await _service.cachePickings(pickingTypeCode, items);
+      if (_isDefaultView) {
+        await _service.cachePickings(_cacheScope, items);
       }
     } catch (e) {
       _error = OdooErrorMapper.toUserMessage(e);
@@ -184,6 +218,7 @@ class PickingProvider extends ChangeNotifier {
     _endDate = null;
     _selectedGroupBy = null;
     _groupSummary.clear();
+    _groupDomains.clear();
     _loadedGroups.clear();
     notifyListeners();
   }
@@ -192,6 +227,7 @@ class PickingProvider extends ChangeNotifier {
     _selectedGroupBy = groupBy;
     if (groupBy == null) {
       _groupSummary.clear();
+      _groupDomains.clear();
       _loadedGroups.clear();
     }
     notifyListeners();
@@ -202,7 +238,7 @@ class PickingProvider extends ChangeNotifier {
 
     if (_groupSummary.isEmpty) {
       final cached = await _service.loadCachedGroupSummary(
-        pickingTypeCode,
+        _cacheScope,
         _selectedGroupBy!,
       );
       if (cached.isNotEmpty) {
@@ -212,7 +248,9 @@ class PickingProvider extends ChangeNotifier {
     }
 
     try {
+      final domains = <String, List<dynamic>>{};
       final summary = await _service.fetchGroupSummary(
+        domainsOut: domains,
         pickingTypeCode: pickingTypeCode,
         groupByField: _selectedGroupBy!,
         searchQuery: _searchQuery.isEmpty ? null : _searchQuery,
@@ -221,14 +259,14 @@ class PickingProvider extends ChangeNotifier {
         endDate: _endDate,
       );
       _groupSummary = summary;
+      _groupDomains
+        ..clear()
+        ..addAll(domains);
       _loadedGroups.clear();
 
-      if (_searchQuery.isEmpty &&
-          _states.isEmpty &&
-          _startDate == null &&
-          _endDate == null) {
+      if (_isDefaultView) {
         await _service.cacheGroupSummary(
-          pickingTypeCode,
+          _cacheScope,
           _selectedGroupBy!,
           summary,
         );
@@ -244,24 +282,17 @@ class PickingProvider extends ChangeNotifier {
   Future<void> loadGroupPickings(String groupKey) async {
     if (_loadedGroups.containsKey(groupKey)) return;
     try {
-      List<String>? groupStates;
-      DateTime? start;
-      DateTime? end;
-      String? search;
-      search = _searchQuery.isEmpty ? null : _searchQuery;
-
-      if (_selectedGroupBy == 'state') {
-        groupStates = [groupKey];
-      }
-      start = _startDate;
-      end = _endDate;
+      // Groups shown from the offline cache carry no domain yet.
+      if (!_groupDomains.containsKey(groupKey)) await fetchGroupSummary();
+      final domain = _groupDomains[groupKey];
+      // Without the group's domain there is nothing correct to show: the old
+      // fallback filtered only Status groups, so every Priority or Date group
+      // listed the same pickings.
+      if (domain == null) return;
 
       final items = await _service.fetchPickings(
         pickingTypeCode: pickingTypeCode,
-        searchQuery: search,
-        states: groupStates ?? (_states.isEmpty ? null : _states),
-        startDate: start,
-        endDate: end,
+        domainOverride: domain,
         limit: 100,
         offset: 0,
       );
@@ -280,11 +311,12 @@ class PickingProvider extends ChangeNotifier {
     _totalCount = 0;
     _currentPage = 0;
     _searchQuery = '';
-    _states = [];
+    _states = List<String>.of(initialStates);
     _startDate = null;
     _endDate = null;
     _selectedGroupBy = null;
     _groupSummary.clear();
+    _groupDomains.clear();
     _loadedGroups.clear();
     notifyListeners();
   }

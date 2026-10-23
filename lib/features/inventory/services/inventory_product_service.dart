@@ -11,9 +11,44 @@ class InventoryProductService {
     return client;
   }
 
-  List<dynamic> _buildDomain({
+  /// Fields every product list reads; [InventoryProduct.fromJson] uses them.
+  ///
+  /// Without an explicit whitelist, Odoo returns every field on the model —
+  /// including every image resolution variant (image_256, image_512,
+  /// image_1024, image_1920) as full base64 payloads, since bin_size is
+  /// false. Only image_128 is ever read; fetching the rest bloats the
+  /// response enough to get the connection dropped mid-stream on slower
+  /// links.
+  static const List<String> listFields = [
+    'id',
+    'name',
+    'display_name',
+    'default_code',
+    'barcode',
+    'qty_available',
+    'virtual_available',
+    'incoming_qty',
+    'outgoing_qty',
+    'free_qty',
+    'standard_price',
+    'lst_price',
+    'uom_id',
+    'categ_id',
+    'image_128',
+  ];
+
+  /// The product list's filters as an Odoo domain; the grouped view uses the
+  /// same one.
+  ///
+  /// [categoryIds] match their sub-categories too (`child_of`), as Odoo's own
+  /// category filter does: products sit in leaf categories such as
+  /// "Furniture / Office", so a parent like "Furniture" holds none itself.
+  /// [isStorable] is the `is_storable` flag Odoo 18 introduced when it folded
+  /// the "Storable Product" type into "Goods"; before 18 storable is
+  /// [productType] `product`.
+  static List<dynamic> buildDomain({
     String? searchQuery,
-    List<String>? categories,
+    List<int>? categoryIds,
     bool? inStockOnly,
     String? productType,
     bool? isStorable,
@@ -26,17 +61,8 @@ class InventoryProductService {
   }) {
     List<dynamic> domain = [];
 
-    if (categories != null && categories.isNotEmpty) {
-      if (categories.length == 1) {
-        domain.add(['categ_id.name', '=', categories.first]);
-      } else {
-        for (int i = 0; i < categories.length - 1; i++) {
-          domain.add('|');
-        }
-        for (final cat in categories) {
-          domain.add(['categ_id.name', '=', cat]);
-        }
-      }
+    if (categoryIds != null && categoryIds.isNotEmpty) {
+      domain.add(['categ_id', 'child_of', categoryIds]);
     }
 
     if (inStockOnly == true) {
@@ -47,6 +73,10 @@ class InventoryProductService {
 
     if (productType != null) {
       domain.add(['type', '=', productType]);
+    }
+
+    if (isStorable == true) {
+      domain.add(['is_storable', '=', true]);
     }
 
     if (availableInPos == true) {
@@ -91,7 +121,7 @@ class InventoryProductService {
   /// Fetches a list of products based on various filters and search queries.
   Future<List<InventoryProduct>> fetchProducts({
     String? searchQuery,
-    List<String>? categories,
+    List<int>? categoryIds,
     bool? inStockOnly,
     String? productType,
     bool? isStorable,
@@ -107,9 +137,9 @@ class InventoryProductService {
     final client = await _getClient();
     final session = await OdooSessionManager.getCurrentSession();
 
-    final domain = _buildDomain(
+    final domain = buildDomain(
       searchQuery: searchQuery,
-      categories: categories,
+      categoryIds: categoryIds,
       inStockOnly: inStockOnly,
       productType: productType,
       isStorable: isStorable,
@@ -135,6 +165,7 @@ class InventoryProductService {
           [...domain],
         ],
         'kwargs': {
+          'fields': listFields,
           'limit': limit,
           'offset': offset,
           'context': {
@@ -171,7 +202,7 @@ class InventoryProductService {
 
   Future<int> getProductCount({
     String? searchQuery,
-    List<String>? categories,
+    List<int>? categoryIds,
     bool? inStockOnly,
     String? productType,
     bool? isStorable,
@@ -185,9 +216,9 @@ class InventoryProductService {
     final client = await _getClient();
     final session = await OdooSessionManager.getCurrentSession();
 
-    final domain = _buildDomain(
+    final domain = buildDomain(
       searchQuery: searchQuery,
-      categories: categories,
+      categoryIds: categoryIds,
       inStockOnly: inStockOnly,
       productType: productType,
       isStorable: isStorable,
@@ -226,7 +257,9 @@ class InventoryProductService {
     }
   }
 
-  Future<List<String>> fetchCategories() async {
+  /// Product categories as `id` → full path ("Furniture / Office"), so
+  /// sub-categories that share a name stay apart.
+  Future<Map<int, String>> fetchCategories() async {
     final client = await _getClient();
 
     try {
@@ -235,16 +268,22 @@ class InventoryProductService {
         'method': 'search_read',
         'args': [],
         'kwargs': {
-          'fields': ['name'],
-          'limit': 100,
-          'order': 'name asc',
+          // `complete_name` is not stored on every release, so it cannot be
+          // the server-side order.
+          'fields': ['id', 'complete_name'],
+          'limit': 200,
         },
       });
 
       final list = (result as List).cast<Map<String, dynamic>>();
-      return list.map((cat) => cat['name'] as String).toList();
+      final entries = [
+        for (final cat in list)
+          if (cat['id'] is int)
+            MapEntry(cat['id'] as int, cat['complete_name']?.toString() ?? ''),
+      ]..sort((a, b) => a.value.toLowerCase().compareTo(b.value.toLowerCase()));
+      return Map.fromEntries(entries);
     } catch (e) {
-      return [];
+      return {};
     }
   }
 }

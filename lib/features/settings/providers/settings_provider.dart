@@ -57,6 +57,34 @@ class SettingsProvider extends ChangeNotifier {
     fetchAllLanguageRegionData();
   }
 
+  /// Forgets the language/currency/timezone lists fetched from the outgoing
+  /// account's server — another server has its own installed languages and
+  /// active currencies — so the Settings screen fetches the new server's
+  /// instead of painting the old one's first. Device preferences (dark mode,
+  /// notifications, reduce motion) are left alone.
+  Future<void> resetServerData() async {
+    _availableLanguages = [];
+    _availableCurrencies = [];
+    _availableTimezones = [];
+    _languagesUpdatedAt = null;
+    _currenciesUpdatedAt = null;
+    _timezonesUpdatedAt = null;
+    notifyListeners();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      for (final key in const [
+        'available_languages',
+        'available_currencies',
+        'available_timezones',
+        'langs_updated_at',
+        'currs_updated_at',
+        'tz_updated_at',
+      ]) {
+        await prefs.remove(key);
+      }
+    } catch (_) {}
+  }
+
   Future<void> loadLocalSettings() async {
     try {
       final prefs = await SharedPreferences.getInstance();

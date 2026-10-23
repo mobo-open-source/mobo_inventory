@@ -1,6 +1,14 @@
 import 'dart:convert';
 import 'dart:io';
 
+/// Thrown when the server refuses to list its databases (`list_db = False`).
+class DatabaseListAccessDenied implements Exception {
+  const DatabaseListAccessDenied();
+
+  @override
+  String toString() => 'DatabaseListAccessDenied';
+}
+
 /// Service for fetching database lists directly from Odoo servers via RPC.
 class DatabaseService {
   /// Fetches the list of available databases for a given [url].
@@ -41,9 +49,27 @@ class DatabaseService {
             .map((db) => db.toString())
             .toList();
       }
+      if (_isAccessDenied(jsonResponse['error'])) {
+        throw const DatabaseListAccessDenied();
+      }
       return [];
+    } on DatabaseListAccessDenied {
+      rethrow;
     } catch (e) {
       throw Exception('Error fetching database list: $e');
     }
+  }
+
+  /// Odoo 20 reworded the `list_db = False` denial ("Database management
+  /// functions blocked, ..."), so the exception type is what is matched.
+  static bool _isAccessDenied(dynamic error) {
+    if (error is! Map) return false;
+    final data = error['data'];
+    final name = (data is Map ? data['name'] : null)?.toString() ?? '';
+    final message = '${error['message'] ?? ''} ${data is Map ? data['message'] ?? '' : ''}'
+        .toLowerCase();
+    return name.contains('AccessDenied') ||
+        message.contains('access denied') ||
+        message.contains('database management functions blocked');
   }
 }

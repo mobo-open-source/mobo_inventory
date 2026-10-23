@@ -1,19 +1,20 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:hugeicons/hugeicons.dart';
 import '../../../shared/widgets/loaders/list_shimmer.dart';
 import '../../../shared/widgets/pagination/pagination_controls.dart';
+import '../../../shared/widgets/search/mobo_search_filter_bar.dart';
 import '../providers/move_history_provider.dart';
 import '../widgets/move_history_list_tile.dart';
 import '../widgets/move_history_group_tile.dart';
-import '../widgets/move_history_filter_bottom_sheet.dart';
-import '../models/move_history_item.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/routing/app_routes.dart';
 import '../../../shared/widgets/empty_state.dart';
+import '../../../core/services/error_manager.dart';
 import '../../../shared/widgets/filters/active_filters_badge.dart';
 import '../../../shared/widgets/filters/group_by_pill.dart';
+import '../../../shared/widgets/filters/premium_filter_bottom_sheet.dart';
+import '../../../shared/widgets/layout/collapsible_header_layout.dart';
 
 /// A screen displaying a searchable and filterable audit trail of stock movements.
 ///
@@ -28,11 +29,13 @@ class MoveHistoryScreen extends StatefulWidget {
 
 class _MoveHistoryScreenState extends State<MoveHistoryScreen> {
   final TextEditingController _searchController = TextEditingController();
-  final ScrollController _scrollController = ScrollController();
   Timer? _debounce;
 
   final Map<String, bool> _expandedGroups = {};
   bool _allGroupsExpanded = false;
+
+  /// Groups whose "Load more" is fetching.
+  final Set<String> _loadingMoreGroups = {};
 
   @override
   void initState() {
@@ -54,7 +57,6 @@ class _MoveHistoryScreenState extends State<MoveHistoryScreen> {
     _debounce?.cancel();
     _searchController.removeListener(_onSearchChanged);
     _searchController.dispose();
-    _scrollController.dispose();
     super.dispose();
   }
 
@@ -63,8 +65,14 @@ class _MoveHistoryScreenState extends State<MoveHistoryScreen> {
     _debounce = Timer(const Duration(milliseconds: 500), () {
       if (mounted) {
         final provider = context.read<MoveHistoryProvider>();
+        // updateFilters replaces every filter, so the others are passed
+        // back as they are: searching narrows the list, it doesn't reset
+        // the Done filter or the dates.
         provider.fetchHistory(
           searchQuery: _searchController.text.trim(),
+          status: provider.status,
+          dateFrom: provider.dateFrom,
+          dateTo: provider.dateTo,
           updateFilters: true,
         );
       }
@@ -76,17 +84,169 @@ class _MoveHistoryScreenState extends State<MoveHistoryScreen> {
     await provider.refresh();
   }
 
+  static String _snake(String s) => s.toLowerCase().replaceAll(' ', '_');
+
   void _showFilters() {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      useRootNavigator: true,
-      backgroundColor: Colors.transparent,
-      builder: (context) => MoveHistoryFilterBottomSheet(
-        provider: context.read<MoveHistoryProvider>(),
-        onClearSearch: () => _searchController.clear(),
-      ),
+    final provider = context.read<MoveHistoryProvider>();
+
+    final moveStatusGroup = FilterGroup(
+      title: 'Move Status',
+      options: [
+        FilterOption(title: 'Done', value: provider.status == 'done'),
+        FilterOption(title: 'Cancelled', value: provider.status == 'cancel'),
+        FilterOption(title: 'Assigned', value: provider.status == 'assigned'),
+      ],
     );
+
+    final moveTypeGroup = FilterGroup(
+      title: 'Move Type',
+      options: [
+        FilterOption(
+          title: 'Outgoing',
+          value: provider.pickingTypeCodes.contains('outgoing'),
+        ),
+        FilterOption(
+          title: 'Internal',
+          value: provider.pickingTypeCodes.contains('internal'),
+        ),
+        FilterOption(
+          title: 'Incoming',
+          value: provider.pickingTypeCodes.contains('incoming'),
+        ),
+      ],
+    );
+
+    final filterOptionsGroup = FilterGroup(
+      title: 'Filter Options',
+      options: [
+        FilterOption(title: 'Active Only', value: provider.activeOnly),
+        FilterOption(title: 'Inventory Only', value: provider.inventoryOnly),
+      ],
+    );
+
+    final dateRangeGroup = FilterGroup(
+      title: 'Date Range',
+      options: [
+        FilterOption(
+          title: 'Start Date',
+          value: provider.dateFrom != null,
+          selectedValue: provider.dateFrom,
+        ),
+        FilterOption(
+          title: 'End Date',
+          value: provider.dateTo != null,
+          selectedValue: provider.dateTo,
+        ),
+      ],
+    );
+
+    final isDateGroupBy =
+        provider.selectedGroupBy?.startsWith('date:') ?? false;
+    const groupBySubtitles = {
+      'product': 'Group by product',
+      'state': 'Group by move status',
+      'location': 'Group by source and destination',
+      'category': 'Group by product category',
+      'transfer': 'Group by transfer reference',
+      'date:day': 'Group by move date',
+    };
+    final groupByGroup = FilterGroup(
+      title: 'Group By',
+      options: provider.groupByOptions.entries
+          .map(
+            (entry) => FilterOption(
+              title: entry.value,
+              subtitle: groupBySubtitles[entry.key],
+              value: entry.key.startsWith('date:')
+                  ? isDateGroupBy
+                  : provider.selectedGroupBy == entry.key,
+              selectedValue: entry.key.startsWith('date:') && isDateGroupBy
+                  ? provider.selectedGroupBy!.split(':').last
+                  : null,
+            ),
+          )
+          .toList(),
+    );
+
+    PremiumFilterBottomSheet.show(
+      context: context,
+      title: 'Filter & Group By',
+      filterGroups: [
+        moveStatusGroup,
+        moveTypeGroup,
+        filterOptionsGroup,
+        dateRangeGroup,
+      ],
+      groupByOptions: [groupByGroup],
+      onApply: (values) {
+        String? status;
+        if (values['move_status_done'] == true) {
+          status = 'done';
+        } else if (values['move_status_cancelled'] == true) {
+          status = 'cancel';
+        } else if (values['move_status_assigned'] == true) {
+          status = 'assigned';
+        }
+
+        final pickingTypeCodes = <String>[];
+        if (values['move_type_outgoing'] == true) {
+          pickingTypeCodes.add('outgoing');
+        }
+        if (values['move_type_internal'] == true) {
+          pickingTypeCodes.add('internal');
+        }
+        if (values['move_type_incoming'] == true) {
+          pickingTypeCodes.add('incoming');
+        }
+
+        final activeOnly = values['filter_options_active_only'] == true;
+        final inventoryOnly = values['filter_options_inventory_only'] == true;
+
+        final dateFrom = values['date_range_start_date'] == true
+            ? values['date_range_start_date_value'] as DateTime?
+            : null;
+        final dateTo = values['date_range_end_date'] == true
+            ? values['date_range_end_date_value'] as DateTime?
+            : null;
+
+        String? groupBy;
+        for (final entry in provider.groupByOptions.entries) {
+          final key = 'group_by_${_snake(entry.value)}';
+          if (values[key] == true) {
+            if (entry.key.startsWith('date:')) {
+              final unit = values['${key}_value'] as String? ?? 'day';
+              groupBy = 'date:$unit';
+            } else {
+              groupBy = entry.key;
+            }
+            break;
+          }
+        }
+
+        provider.setGroupBy(groupBy);
+        provider.fetchHistory(
+          status: status,
+          pickingTypeCodes: pickingTypeCodes,
+          dateFrom: dateFrom,
+          dateTo: dateTo,
+          activeOnly: activeOnly,
+          inventoryOnly: inventoryOnly,
+          groupBy: groupBy,
+          updateFilters: true,
+        );
+      },
+    );
+  }
+
+  bool _hasActiveFilter(MoveHistoryProvider provider) {
+    return (provider.status?.isNotEmpty ?? false) ||
+        provider.pickingTypeCodes.isNotEmpty ||
+        provider.dateFrom != null ||
+        provider.dateTo != null ||
+        provider.activeOnly ||
+        provider.inventoryOnly ||
+        provider.selectedGroupBy != null ||
+        _searchController.text.trim().isNotEmpty;
   }
 
   Widget _buildGroupByPill(ThemeData theme, String? groupBy) {
@@ -118,412 +278,375 @@ class _MoveHistoryScreenState extends State<MoveHistoryScreen> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
+    final compact = isCompactHeight(context);
 
     return Scaffold(
-      backgroundColor: theme.scaffoldBackgroundColor,
-      body: Column(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(16),
-            color: theme.scaffoldBackgroundColor,
-            child: TextField(
-              controller: _searchController,
-              onSubmitted: (val) {
-                context.read<MoveHistoryProvider>().fetchHistory(
-                  searchQuery: val.trim(),
-                  updateFilters: true,
-                );
-              },
-              decoration: InputDecoration(
-                hintText: 'Search product or reference...',
-                prefixIcon: IconButton(
-                  icon: Icon(
-                    HugeIcons.strokeRoundedFilterHorizontal,
-                    color: isDark ? Colors.grey[400] : Colors.grey[600],
-                    size: 18,
-                  ),
-                  onPressed: () => _showFilters(),
-                  tooltip: 'Filter & Group By',
-                ),
-                suffixIcon: _searchController.text.isNotEmpty
-                    ? IconButton(
-                        icon: Icon(
-                          Icons.clear,
-                          color: isDark ? Colors.grey[400] : Colors.grey,
-                        ),
-                        onPressed: () {
-                          _searchController.clear();
-                          context.read<MoveHistoryProvider>().fetchHistory(
-                            searchQuery: '',
-                            updateFilters: true,
-                          );
-                        },
-                      )
-                    : null,
-                filled: true,
-                fillColor: isDark ? Colors.grey[850] : Colors.white,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide.none,
-                ),
-                contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 12,
-                ),
-                isDense: true,
+      body: CollapsibleHeaderLayout(
+        header: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(16),
+              color: theme.scaffoldBackgroundColor,
+              child: Consumer<MoveHistoryProvider>(
+                builder: (_, provider, __) {
+                  return MoboSearchFilterBar(
+                    controller: _searchController,
+                    hintText: 'Search product or reference...',
+                    hasActiveFilter: _hasActiveFilter(provider),
+                    onFilterTap: _showFilters,
+                    onChanged: (_) => setState(() {}),
+                  );
+                },
               ),
             ),
-          ),
 
-          Consumer<MoveHistoryProvider>(
-            builder: (_, provider, __) {
-              return Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Expanded(
-                      child: SingleChildScrollView(
-                        scrollDirection: Axis.horizontal,
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            _buildActiveFiltersBadge(provider, theme),
-                            if (provider.selectedGroupBy != null) ...[
-                              const SizedBox(width: 8),
-                              _buildGroupByPill(
-                                theme,
-                                provider.selectedGroupBy,
-                              ),
+            Consumer<MoveHistoryProvider>(
+              builder: (_, provider, __) {
+                return Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Expanded(
+                        child: SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              _buildActiveFiltersBadge(provider, theme),
+                              if (provider.selectedGroupBy != null) ...[
+                                const SizedBox(width: 8),
+                                _buildGroupByPill(
+                                  theme,
+                                  provider.selectedGroupBy,
+                                ),
+                              ],
                             ],
-                          ],
+                          ),
                         ),
                       ),
+                      ..._buildPager(provider, isDark, theme),
+                    ],
+                  ),
+                );
+              },
+            ),
+          ],
+        ),
+
+        body: Consumer<MoveHistoryProvider>(
+          builder: (_, provider, __) {
+            if (!provider.isLoading &&
+                !provider.hasLoadedOnce &&
+                provider.error == null) {
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                _fetchData(provider);
+              });
+            }
+
+            if (!provider.hasLoadedOnce && provider.items.isEmpty) {
+              return RefreshIndicator(
+                onRefresh: _refreshMoveHistory,
+                child: SingleChildScrollView(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    child: ListShimmer.buildListShimmer(
+                      context,
+                      itemCount: 8,
+                      type: ShimmerType.standard,
                     ),
-                    if (provider.totalCount > 0 && provider.items.isNotEmpty)
-                      PaginationControls(
-                        canGoToPreviousPage: provider.canGoToPreviousPage,
-                        canGoToNextPage: provider.canGoToNextPage,
-                        onPreviousPage: provider.goToPreviousPage,
-                        onNextPage: provider.goToNextPage,
-                        paginationText: provider.getPaginationText(),
-                        isDark: isDark,
-                        theme: theme,
-                      ),
+                  ),
+                ),
+              );
+            }
+
+            if (provider.isLoading && provider.items.isEmpty) {
+              return RefreshIndicator(
+                onRefresh: _refreshMoveHistory,
+                child: SingleChildScrollView(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    child: ListShimmer.buildListShimmer(
+                      context,
+                      itemCount: 8,
+                      type: ShimmerType.standard,
+                    ),
+                  ),
+                ),
+              );
+            }
+
+            if (provider.error != null && provider.items.isEmpty) {
+              final info = ErrorManager.analyzeError(provider.error!);
+              final lottiePath = info.type == ErrorType.moduleNotInstalled
+                  ? 'assets/lotties/socialv no data.json'
+                  : 'assets/lotties/Error 404.json';
+
+              return EmptyState(
+                title: info.title,
+                subtitle: info.message,
+                lottieAsset: lottiePath,
+                actionLabel: 'Retry',
+                onAction: () => _refreshMoveHistory(),
+              );
+            }
+
+            if (provider.items.isEmpty && provider.hasLoadedOnce) {
+              final hasActiveFilters = _hasActiveFilter(provider);
+
+              return RefreshIndicator(
+                onRefresh: _refreshMoveHistory,
+                child: ListView(
+                  children: [
+                    const SizedBox(height: 48),
+                    EmptyState(
+                      title: 'No move history found',
+                      subtitle: hasActiveFilters
+                          ? 'Try adjusting your filters'
+                          : 'Stock movements will appear here',
+                      lottieAsset: 'assets/lotties/empty ghost.json',
+                      actionLabel: hasActiveFilters
+                          ? 'Clear All Filters'
+                          : 'Refresh',
+                      onAction: hasActiveFilters
+                          ? _clearAllFilters
+                          : _refreshMoveHistory,
+                    ),
                   ],
                 ),
               );
-            },
-          ),
+            }
 
-          Expanded(
-            child: Consumer<MoveHistoryProvider>(
-              builder: (_, provider, __) {
-                if (!provider.isLoading &&
-                    !provider.hasLoadedOnce &&
-                    provider.error == null) {
-                  WidgetsBinding.instance.addPostFrameCallback((_) {
-                    _fetchData(provider);
-                  });
-                }
+            final groupBy = provider.selectedGroupBy;
 
-                if (!provider.hasLoadedOnce && provider.items.isEmpty) {
-                  return RefreshIndicator(
-                    onRefresh: _refreshMoveHistory,
-                    child: SingleChildScrollView(
-                      physics: const AlwaysScrollableScrollPhysics(),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 8),
-                        child: ListShimmer.buildListShimmer(
-                          context,
-                          itemCount: 8,
-                          type: ShimmerType.standard,
-                        ),
-                      ),
-                    ),
-                  );
-                }
-
-                if (provider.isLoading && provider.items.isEmpty) {
-                  return RefreshIndicator(
-                    onRefresh: _refreshMoveHistory,
-                    child: SingleChildScrollView(
-                      physics: const AlwaysScrollableScrollPhysics(),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 8),
-                        child: ListShimmer.buildListShimmer(
-                          context,
-                          itemCount: 8,
-                          type: ShimmerType.standard,
-                        ),
-                      ),
-                    ),
-                  );
-                }
-
-                if (provider.error != null && provider.items.isEmpty) {
-                  final err = provider.error!.toLowerCase();
-                  final isModuleNotInstalled =
-                      err.contains('module') && err.contains('not installed');
-                  final title = isModuleNotInstalled
-                      ? 'Feature unavailable'
-                      : 'Something went wrong';
-                  final subtitle = isModuleNotInstalled
-                      ? 'This module is not installed on your server. Please contact your administrator.'
-                      : 'Pull to refresh or tap retry';
-                  final lottiePath = isModuleNotInstalled
-                      ? 'assets/lotties/socialv no data.json'
-                      : 'assets/lotties/Error 404.json';
-
-                  return RefreshIndicator(
-                    onRefresh: () => _refreshMoveHistory(),
-                    child: ListView(
-                      children: [
-                        const SizedBox(height: 48),
-                        EmptyState(
-                          title: title,
-                          subtitle: subtitle,
-                          lottieAsset: lottiePath,
-                          actionLabel: 'Retry',
-                          onAction: () => _refreshMoveHistory(),
-                        ),
-                      ],
-                    ),
-                  );
-                }
-
-                if (provider.items.isEmpty && provider.hasLoadedOnce) {
-                  final hasActiveFilters =
-                      (provider.status?.isNotEmpty ?? false) ||
-                      provider.pickingTypeCodes.isNotEmpty ||
-                      provider.dateFrom != null ||
-                      provider.dateTo != null ||
-                      provider.activeOnly ||
-                      provider.inventoryOnly ||
-                      provider.selectedGroupBy != null ||
-                      _searchController.text.trim().isNotEmpty;
-
-                  return RefreshIndicator(
-                    onRefresh: _refreshMoveHistory,
-                    child: ListView(
-                      children: [
-                        const SizedBox(height: 48),
-                        EmptyState(
-                          title: 'No move history found',
-                          subtitle: hasActiveFilters
-                              ? 'Try adjusting your filters'
-                              : 'Stock movements will appear here',
-                          lottieAsset: 'assets/lotties/empty ghost.json',
-                          actionLabel: hasActiveFilters
-                              ? 'Clear All Filters'
-                              : 'Refresh',
-                          onAction: hasActiveFilters
-                              ? _clearAllFilters
-                              : _refreshMoveHistory,
-                        ),
-                      ],
-                    ),
-                  );
-                }
-
-                final groupBy = provider.selectedGroupBy;
-
-                if (groupBy == null) {
-                  return RefreshIndicator(
-                    onRefresh: _refreshMoveHistory,
-                    child: ListView.builder(
-                      controller: _scrollController,
-                      padding: const EdgeInsets.all(16),
-                      itemCount: provider.items.length,
-                      itemBuilder: (context, index) {
-                        final item = provider.items[index];
-                        return MoveHistoryListTile(
-                          key: ValueKey(item.id),
-                          item: item,
-                          isDark: isDark,
-                          onTap: () {
-                            context.pushNamed(
-                              AppRoutes.moveHistoryDetail,
-                              extra: item,
-                            );
-                          },
+            if (groupBy == null) {
+              return RefreshIndicator(
+                onRefresh: _refreshMoveHistory,
+                child: ListView.builder(
+                  padding: const EdgeInsets.all(16),
+                  itemCount: provider.items.length,
+                  itemBuilder: (context, index) {
+                    final item = provider.items[index];
+                    return MoveHistoryListTile(
+                      key: ValueKey(item.id),
+                      item: item,
+                      isDark: isDark,
+                      onTap: () {
+                        context.pushNamed(
+                          AppRoutes.moveHistoryDetail,
+                          extra: item,
                         );
                       },
+                    );
+                  },
+                ),
+              );
+            }
+
+            // Counted on the server across every matching move line, in
+            // Odoo's order — not just the page of lines loaded above.
+            final sortedKeys = provider.groupSummary.keys.toList();
+
+            if (sortedKeys.isEmpty) {
+              return EmptyState(
+                title: 'No groups found',
+                subtitle: 'Try reloading the groups',
+                lottieAsset: 'assets/lotties/empty ghost.json',
+                actionLabel: 'Reload Groups',
+                onAction: provider.fetchGroupSummary,
+              );
+            }
+
+            for (final groupKey in sortedKeys) {
+              if (!_expandedGroups.containsKey(groupKey)) {
+                _expandedGroups[groupKey] = false;
+              }
+            }
+
+            // "N groups / Expand All" row: pinned above the list normally,
+            // the list's first item on a short screen so it scrolls away
+            // with the header.
+            final summary = Container(
+              padding: compact
+                  ? const EdgeInsets.only(bottom: 4)
+                  : const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    '${sortedKeys.length} groups',
+                    style: TextStyle(
+                      color: isDark ? Colors.grey[400] : Colors.grey[600],
+                      fontSize: 14,
+                      fontWeight: FontWeight.w500,
                     ),
-                  );
-                }
-
-                final groups = _buildGroups(provider.items, groupBy);
-                final sortedKeys = groups.keys.toList()..sort();
-
-                for (final groupKey in sortedKeys) {
-                  if (!_expandedGroups.containsKey(groupKey)) {
-                    _expandedGroups[groupKey] = false;
-                  }
-                }
-
-                return Column(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 12,
-                      ),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text(
-                            '${sortedKeys.length} groups',
-                            style: TextStyle(
-                              color: isDark
-                                  ? Colors.grey[400]
-                                  : Colors.grey[600],
-                              fontSize: 14,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                          Row(
-                            children: [
-                              if (!_allGroupsExpanded && sortedKeys.isNotEmpty)
-                                TextButton.icon(
-                                  onPressed: () {
-                                    setState(() {
-                                      for (final key in sortedKeys) {
-                                        _expandedGroups[key] = true;
-                                      }
-                                      _allGroupsExpanded = true;
-                                    });
-                                  },
-                                  icon: const Icon(Icons.expand_more, size: 18),
-                                  label: const Text('Expand All'),
-                                  style: TextButton.styleFrom(
-                                    foregroundColor: isDark
-                                        ? Colors.white
-                                        : Colors.black87,
-                                  ),
-                                ),
-                              if (_expandedGroups.values.any(
-                                (expanded) => expanded,
-                              ))
-                                TextButton.icon(
-                                  onPressed: () {
-                                    setState(() {
-                                      for (final key in sortedKeys) {
-                                        _expandedGroups[key] = false;
-                                      }
-                                      _allGroupsExpanded = false;
-                                    });
-                                  },
-                                  icon: const Icon(Icons.expand_less, size: 18),
-                                  label: const Text('Collapse All'),
-                                  style: TextButton.styleFrom(
-                                    foregroundColor: isDark
-                                        ? Colors.white
-                                        : Colors.black87,
-                                  ),
-                                ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-                    Expanded(
-                      child: RefreshIndicator(
-                        onRefresh: _refreshMoveHistory,
-                        child: ListView.builder(
-                          controller: _scrollController,
-                          padding: const EdgeInsets.all(16),
-                          itemCount: sortedKeys.length,
-                          itemBuilder: (context, index) {
-                            final key = sortedKeys[index];
-                            final items = groups[key]!;
-                            final isExpanded = _expandedGroups[key] ?? false;
-
-                            return MoveHistoryGroupTile(
-                              groupKey: key,
-                              count: items.length,
-                              items: items,
-                              isDark: isDark,
-                              theme: theme,
-                              isExpanded: isExpanded,
-                              onToggle: () {
-                                setState(() {
-                                  _expandedGroups[key] = !isExpanded;
-                                  _allGroupsExpanded = _expandedGroups.values
-                                      .every((expanded) => expanded);
-                                });
-                              },
-                            );
+                  ),
+                  Row(
+                    children: [
+                      if (!_allGroupsExpanded && sortedKeys.isNotEmpty)
+                        TextButton.icon(
+                          onPressed: () async {
+                            setState(() {
+                              for (final key in sortedKeys) {
+                                _expandedGroups[key] = true;
+                              }
+                              _allGroupsExpanded = true;
+                            });
+                            for (final key in sortedKeys) {
+                              await provider.loadGroupItems(key);
+                            }
                           },
+                          icon: const Icon(Icons.expand_more, size: 18),
+                          label: const Text('Expand All'),
+                          style: TextButton.styleFrom(
+                            foregroundColor: isDark
+                                ? Colors.white
+                                : Colors.black87,
+                          ),
                         ),
-                      ),
-                    ),
-                  ],
-                );
-              },
-            ),
-          ),
-        ],
+                      if (_expandedGroups.values.any((expanded) => expanded))
+                        TextButton.icon(
+                          onPressed: () {
+                            setState(() {
+                              for (final key in sortedKeys) {
+                                _expandedGroups[key] = false;
+                              }
+                              _allGroupsExpanded = false;
+                            });
+                          },
+                          icon: const Icon(Icons.expand_less, size: 18),
+                          label: const Text('Collapse All'),
+                          style: TextButton.styleFrom(
+                            foregroundColor: isDark
+                                ? Colors.white
+                                : Colors.black87,
+                          ),
+                        ),
+                    ],
+                  ),
+                ],
+              ),
+            );
+
+            final groupList = RefreshIndicator(
+              onRefresh: _refreshMoveHistory,
+              child: ListView.builder(
+                padding: EdgeInsets.fromLTRB(16, compact ? 8 : 16, 16, 16),
+                itemCount: sortedKeys.length + (compact ? 1 : 0),
+                itemBuilder: (context, index) {
+                  if (compact && index == 0) return summary;
+                  final key = sortedKeys[compact ? index - 1 : index];
+                  final items = provider.loadedGroups[key];
+                  final count = provider.groupSummary[key] ?? 0;
+                  final isExpanded = _expandedGroups[key] ?? false;
+
+                  return MoveHistoryGroupTile(
+                    groupKey: key,
+                    count: count,
+                    items: items,
+                    isDark: isDark,
+                    theme: theme,
+                    isExpanded: isExpanded,
+                    onToggle: () {
+                      setState(() {
+                        _expandedGroups[key] = !isExpanded;
+                        _allGroupsExpanded = _expandedGroups.values.every(
+                          (expanded) => expanded,
+                        );
+                      });
+                      if (!isExpanded) provider.loadGroupItems(key);
+                    },
+                    footer: items != null && items.length < count
+                        ? _buildGroupLoadMore(
+                            provider,
+                            key,
+                            count - items.length,
+                          )
+                        : null,
+                  );
+                },
+              ),
+            );
+
+            if (compact) return groupList;
+            return Column(
+              children: [
+                summary,
+                Expanded(child: groupList),
+              ],
+            );
+          },
+        ),
       ),
     );
   }
 
-  Map<String, List<MoveHistoryItem>> _buildGroups(
-    List<MoveHistoryItem> items,
-    String? groupBy,
+  /// The pager, as Odoo shows it: ungrouped it pages the move lines; a
+  /// grouped list pages its groups — each group carries its own count.
+  List<Widget> _buildPager(
+    MoveHistoryProvider provider,
+    bool isDark,
+    ThemeData theme,
   ) {
-    final groups = <String, List<MoveHistoryItem>>{};
-
-    for (final item in items) {
-      final key = _getGroupKey(item, groupBy);
-      groups.putIfAbsent(key, () => []).add(item);
+    if (provider.selectedGroupBy != null) {
+      if (provider.groupSummary.isEmpty) return const [];
+      return [
+        PaginationControls(
+          canGoToPreviousPage: false,
+          canGoToNextPage: false,
+          onPreviousPage: () {},
+          onNextPage: () {},
+          paginationText: PaginationControls.groupsText(
+            provider.groupSummary.length,
+          ),
+          isDark: isDark,
+          theme: theme,
+        ),
+      ];
     }
-
-    return groups;
+    if (provider.totalCount == 0 || provider.items.isEmpty) return const [];
+    return [
+      PaginationControls(
+        canGoToPreviousPage: provider.canGoToPreviousPage,
+        canGoToNextPage: provider.canGoToNextPage,
+        onPreviousPage: provider.goToPreviousPage,
+        onNextPage: provider.goToNextPage,
+        paginationText: provider.getPaginationText(),
+        isDark: isDark,
+        theme: theme,
+      ),
+    ];
   }
 
-  String _getGroupKey(MoveHistoryItem item, String? groupBy) {
-    switch (groupBy) {
-      case 'product':
-        return item.product ?? 'Unknown';
-      case 'state':
-        return _getStatusLabel(item.status);
-      case 'location':
-        final from = item.fromLocation ?? '-';
-        final to = item.toLocation ?? '-';
-        return '$from → $to';
-      case 'category':
-        return item.productCategory ?? 'Unknown';
-      case 'transfer':
-        return item.transfer ?? 'Unknown';
-      case 'date:day':
-        final dt = item.date?.toLocal();
-        if (dt == null) return 'Unknown';
-        return '${dt.year}-${dt.month.toString().padLeft(2, '0')}-${dt.day.toString().padLeft(2, '0')}';
-      default:
-        return 'Other';
-    }
-  }
-
-  String _getStatusLabel(String? state) {
-    switch (state) {
-      case 'draft':
-        return 'New';
-      case 'waiting':
-        return 'Waiting Another Move';
-      case 'confirmed':
-        return 'Waiting Availability';
-      case 'partially_available':
-        return 'Partially Available';
-      case 'assigned':
-        return 'Available';
-      case 'done':
-        return 'Done';
-      case 'cancel':
-        return 'Cancelled';
-      default:
-        return state?.toUpperCase() ?? 'Unknown';
-    }
+  /// "Load more" at the foot of an expanded group showing fewer move lines
+  /// than its count.
+  Widget _buildGroupLoadMore(
+    MoveHistoryProvider provider,
+    String groupKey,
+    int remaining,
+  ) {
+    final loading = _loadingMoreGroups.contains(groupKey);
+    return TextButton(
+      onPressed: loading
+          ? null
+          : () async {
+              setState(() => _loadingMoreGroups.add(groupKey));
+              await provider.loadMoreGroupItems(groupKey);
+              if (mounted) {
+                setState(() => _loadingMoreGroups.remove(groupKey));
+              }
+            },
+      child: loading
+          ? const SizedBox(
+              width: 18,
+              height: 18,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          : Text('Load more ($remaining)'),
+    );
   }
 
   void _clearAllFilters() {

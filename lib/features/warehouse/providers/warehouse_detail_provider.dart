@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../services/warehouse_service.dart';
+import '../../../core/utils/odoo_value.dart';
 
 class WarehouseDetailProvider with ChangeNotifier {
   final WarehouseService _service = WarehouseService();
@@ -15,7 +16,7 @@ class WarehouseDetailProvider with ChangeNotifier {
   bool get isOffline => _isOffline;
 
   String get name => (_detail?['name'] ?? _detail?['display_name'] ?? '').toString();
-  String get code => (_detail?['code'] ?? '').toString();
+  String get code => odooString(_detail?['code']) ?? '';
   String get companyName {
     final c = _detail?['company_id'];
     if (c is List && c.length > 1) return c[1].toString();

@@ -1,12 +1,10 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:go_router/go_router.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:hugeicons/hugeicons.dart';
-
-import '../../../shared/widgets/loaders/loading_widget.dart';
+import 'package:loading_animation_widget/loading_animation_widget.dart';
+import 'package:go_router/go_router.dart';
 import '../../../core/services/reset_password_service.dart';
 
 /// Screen for initiating the password reset process via email.
@@ -23,8 +21,7 @@ class ResetPasswordScreen extends StatefulWidget {
 class _ResetPasswordScreenState extends State<ResetPasswordScreen>
     with TickerProviderStateMixin {
   final _formKey = GlobalKey<FormState>();
-  final _emailController = TextEditingController();
-
+  final TextEditingController _emailController = TextEditingController();
   bool _isLoading = false;
   bool _shouldValidate = false;
   bool _emailHasError = false;
@@ -107,8 +104,6 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen>
         });
         _successAnimationController.forward();
         await HapticFeedback.selectionClick();
-      } else if (result['requiresWebView'] == true) {
-        await HapticFeedback.lightImpact();
       } else {
         setState(() {
           _errorMessage = result['message'];
@@ -135,7 +130,6 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen>
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final screenHeight = MediaQuery.of(context).size.height;
 
     return PopScope(
       canPop: !_isLoading,
@@ -220,8 +214,8 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen>
                     height: 64,
                     width: 64,
                     alignment: Alignment.center,
-                    child: Icon(
-                      HugeIcons.strokeRoundedArrowLeft01,
+                    child: HugeIcon(
+                      icon: HugeIcons.strokeRoundedArrowLeft01,
                       color: _isLoading ? Colors.white54 : Colors.white,
                       size: 24,
                     ),
@@ -238,8 +232,8 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen>
   Widget _buildHeader() {
     return Column(
       children: [
-        Icon(
-          HugeIcons.strokeRoundedLockPassword,
+        HugeIcon(
+          icon: HugeIcons.strokeRoundedLockPassword,
           color: Colors.white,
           size: 48,
         ),
@@ -264,7 +258,7 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen>
           ),
           textAlign: TextAlign.center,
         ),
-        if (widget.url != null) ...[
+        if (widget.url != null && widget.url!.isNotEmpty) ...[
           const SizedBox(height: 16),
           Text(
             'Server: ${widget.url}',
@@ -324,17 +318,29 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen>
                 fontWeight: FontWeight.w400,
                 color: Colors.black.withOpacity(.4),
               ),
-              prefixIcon: Icon(HugeIcons.strokeRoundedMail01, size: 20),
-              prefixIconColor: WidgetStateColor.resolveWith(
-                (states) => states.contains(WidgetState.disabled)
-                    ? Colors.black26
-                    : Colors.black54,
+              prefixIcon: SizedBox(
+                width: 48,
+                height: 48,
+                child: Center(
+                  child: HugeIcon(
+                    icon: HugeIcons.strokeRoundedMail01,
+                    size: 20,
+                    color: _isLoading ? Colors.black26 : Colors.black54,
+                  ),
+                ),
               ),
+
               suffixIcon: _emailHasError
-                  ? Icon(
-                      HugeIcons.strokeRoundedMail01,
-                      color: Colors.red,
-                      size: 20,
+                  ? SizedBox(
+                      width: 48,
+                      height: 48,
+                      child: Center(
+                        child: HugeIcon(
+                          icon: HugeIcons.strokeRoundedAlertCircle,
+                          color: Colors.red,
+                          size: 20,
+                        ),
+                      ),
                     )
                   : null,
               border: OutlineInputBorder(
@@ -360,16 +366,26 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen>
           ),
           const SizedBox(height: 24),
 
-          AnimatedContainer(
+          /// Grows to the message instead of holding a fixed 48px: an
+          /// explanatory error ("reset is not enabled on this server —
+          /// contact your administrator") runs to three lines at 12px, and
+          /// the old fixed height clipped exactly the part that tells the
+          /// user what to do about it.
+          AnimatedSize(
             duration: const Duration(milliseconds: 300),
-            height: _errorMessage != null ? 48 : 0,
+            curve: Curves.easeInOut,
+            alignment: Alignment.topCenter,
             child: _errorMessage != null
                 ? Padding(
                     padding: const EdgeInsets.only(bottom: 8.0),
                     child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Icon(Icons.error, color: Colors.white, size: 18),
+                        HugeIcon(
+                          icon: HugeIcons.strokeRoundedAlertCircle,
+                          color: Colors.white,
+                          size: 18,
+                        ),
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(
@@ -378,13 +394,14 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen>
                               color: Colors.white,
                               fontSize: 12,
                               fontWeight: FontWeight.w400,
+                              height: 1.4,
                             ),
                           ),
                         ),
                       ],
                     ),
                   )
-                : null,
+                : const SizedBox(width: double.infinity),
           ),
 
           const SizedBox(height: 24),
@@ -401,6 +418,7 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen>
                 overlayColor: Colors.transparent,
                 surfaceTintColor: Colors.transparent,
                 elevation: 0,
+                shadowColor: Colors.transparent,
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(12),
                 ),
@@ -417,10 +435,9 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen>
                           ),
                         ),
                         const SizedBox(width: 12),
-                        const LoadingWidget(
+                        LoadingAnimationWidget.staggeredDotsWave(
                           color: Colors.white,
                           size: 28,
-                          variant: LoadingVariant.staggeredDots,
                         ),
                       ],
                     )
@@ -448,7 +465,11 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen>
       ),
       child: Column(
         children: [
-          Icon(Icons.check_circle, color: Colors.green, size: 48),
+          HugeIcon(
+            icon: HugeIcons.strokeRoundedCheckmarkCircle02,
+            color: Colors.green,
+            size: 48,
+          ),
           const SizedBox(height: 16),
           Text(
             'Email Sent!',
@@ -478,7 +499,7 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen>
     return SizedBox(
       height: 48,
       child: ElevatedButton(
-        onPressed: () => context.pop(),
+        onPressed: () => Navigator.of(context).pop(),
         style: ElevatedButton.styleFrom(
           backgroundColor: Colors.black,
           foregroundColor: Colors.white,
@@ -487,6 +508,7 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen>
           overlayColor: Colors.transparent,
           surfaceTintColor: Colors.transparent,
           elevation: 0,
+          shadowColor: Colors.transparent,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),
           ),

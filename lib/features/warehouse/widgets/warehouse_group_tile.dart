@@ -1,8 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:go_router/go_router.dart';
+import '../../../core/theme/app_theme.dart';
 import '../models/warehouse_model.dart';
 import 'warehouse_list_tile.dart';
-import '../../../core/routing/app_routes.dart';
 
 class WarehouseGroupTile extends StatefulWidget {
   final String groupKey;
@@ -35,42 +34,44 @@ class _WarehouseGroupTileState extends State<WarehouseGroupTile> {
     return Container(
       decoration: BoxDecoration(
         color: isDark ? Colors.grey[900] : Colors.white,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(AppRadius.lg),
         border: Border.all(
           color: isDark
-              ? Colors.white.withOpacity(0.08)
-              : Colors.black.withOpacity(0.06),
+              ? Colors.white.withValues(alpha: 0.08)
+              : Colors.black.withValues(alpha: 0.06),
         ),
         boxShadow: [
-          if (!isDark)
-            BoxShadow(
-              blurRadius: 16,
-              spreadRadius: 2,
-              offset: const Offset(0, 6),
-              color: Colors.black.withOpacity(0.08),
-            ),
+          BoxShadow(
+            blurRadius: 16,
+            spreadRadius: 2,
+            offset: const Offset(0, 6),
+            color: Colors.black.withValues(alpha: 0.08),
+          ),
         ],
       ),
-      margin: const EdgeInsets.only(bottom: 12),
+      margin: const EdgeInsets.only(bottom: 8),
       child: Column(
         children: [
           InkWell(
             onTap: () => setState(() => _expanded = !_expanded),
             borderRadius: BorderRadius.circular(12),
+            splashColor: Colors.transparent,
+            highlightColor: Colors.transparent,
             child: Padding(
               padding: const EdgeInsets.all(16),
               child: Row(
                 children: [
                   Container(
-                    padding: const EdgeInsets.all(10),
+                    width: 46,
+                    height: 46,
                     decoration: BoxDecoration(
-                      color: theme.primaryColor.withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(8),
+                      color: theme.primaryColor.withValues(alpha: 0.1),
+                      shape: BoxShape.circle,
                     ),
                     child: Icon(
                       Icons.warehouse_outlined,
                       color: theme.primaryColor,
-                      size: 20,
+                      size: 22,
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -81,16 +82,16 @@ class _WarehouseGroupTileState extends State<WarehouseGroupTile> {
                         Text(
                           widget.groupKey,
                           style: TextStyle(
-                            fontSize: 16,
+                            fontSize: 14,
                             fontWeight: FontWeight.w600,
-                            color: isDark ? Colors.white : Colors.black87,
+                            color: isDark ? Colors.white : Colors.black,
                           ),
                         ),
                         const SizedBox(height: 4),
                         Text(
                           '${widget.count} ${widget.count == 1 ? 'warehouse' : 'warehouses'}',
                           style: TextStyle(
-                            fontSize: 13,
+                            fontSize: 14,
                             color: isDark ? Colors.grey[400] : Colors.grey[600],
                           ),
                         ),
@@ -98,8 +99,10 @@ class _WarehouseGroupTileState extends State<WarehouseGroupTile> {
                     ),
                   ),
                   Icon(
-                    _expanded ? Icons.expand_less : Icons.expand_more,
-                    color: isDark ? Colors.grey[400] : Colors.grey[600],
+                    _expanded
+                        ? Icons.keyboard_arrow_up
+                        : Icons.keyboard_arrow_down,
+                    color: isDark ? Colors.white70 : Colors.black87,
                   ),
                 ],
               ),
@@ -116,12 +119,6 @@ class _WarehouseGroupTileState extends State<WarehouseGroupTile> {
                         key: ValueKey(w.id),
                         warehouse: w,
                         isDark: isDark,
-                        onTap: () {
-                          context.pushNamed(
-                            AppRoutes.warehouseDetail,
-                            extra: {'warehouseId': w.id},
-                          );
-                        },
                       ),
                     )
                     .toList(),

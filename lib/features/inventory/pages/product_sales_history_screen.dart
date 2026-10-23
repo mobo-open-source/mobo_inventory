@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:hugeicons/hugeicons.dart';
 import '../../../core/services/odoo_session_manager.dart';
+import '../../../core/theme/app_theme.dart';
 
 /// Screen displaying the historical sales orders for a specific product.
 class ProductSalesHistoryScreen extends StatefulWidget {
@@ -102,18 +103,8 @@ class _ProductSalesHistoryScreenState extends State<ProductSalesHistoryScreen> {
   }
 
   Color _getStateColor(String? state, bool isDark) {
-    switch (state) {
-      case 'draft':
-      case 'sent':
-        return isDark ? Colors.blue[300]! : Colors.blue[700]!;
-      case 'sale':
-      case 'done':
-        return isDark ? Colors.green[300]! : Colors.green[700]!;
-      case 'cancel':
-        return isDark ? Colors.red[300]! : Colors.red[700]!;
-      default:
-        return isDark ? Colors.grey[400]! : Colors.grey[600]!;
-    }
+    // A confirmed sale order ('sale') reads as complete, like 'done'.
+    return StatusColors.forState(state == 'sale' ? 'done' : state);
   }
 
   @override
@@ -121,7 +112,6 @@ class _ProductSalesHistoryScreenState extends State<ProductSalesHistoryScreen> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Scaffold(
-      backgroundColor: isDark ? Colors.grey[900] : Colors.grey[50],
       appBar: AppBar(
         title: Text(
           'Sales History',
@@ -232,15 +222,9 @@ class _ProductSalesHistoryScreenState extends State<ProductSalesHistoryScreen> {
 
           return Container(
             margin: const EdgeInsets.only(bottom: 12),
-            decoration: BoxDecoration(
-              color: isDark ? Colors.grey[850] : Colors.white,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                color: isDark ? Colors.grey[800]! : Colors.grey[200]!,
-              ),
-            ),
+            decoration: AppTheme.cardDecoration(isDark),
             child: Padding(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.all(14),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -253,27 +237,16 @@ class _ProductSalesHistoryScreenState extends State<ProductSalesHistoryScreen> {
                           style: TextStyle(
                             fontSize: 16,
                             fontWeight: FontWeight.bold,
-                            color: isDark ? Colors.white : Colors.black87,
+                            color: isDark
+                                ? Colors.white
+                                : AppTheme.primaryColor,
                           ),
                         ),
                       ),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 4,
-                        ),
-                        decoration: BoxDecoration(
-                          color: _getStateColor(state, isDark).withOpacity(0.2),
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        child: Text(
-                          _getStateName(state),
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                            color: _getStateColor(state, isDark),
-                          ),
-                        ),
+                      StatusColors.buildStatusBadge(
+                        _getStateName(state),
+                        _getStateColor(state, isDark),
+                        isDark: isDark,
                       ),
                     ],
                   ),

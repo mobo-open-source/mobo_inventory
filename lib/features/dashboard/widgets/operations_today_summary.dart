@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../core/theme/app_theme.dart';
 
 class OperationsTodaySummary extends StatelessWidget {
   final int incomingCount;
@@ -32,20 +33,17 @@ class OperationsTodaySummary extends StatelessWidget {
         borderRadius: BorderRadius.circular(12),
         child: Container(
           padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            color: isDark ? Colors.grey[900] : Colors.white,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: isDark ? Colors.grey[800]! : Colors.grey[200]!),
-          ),
+          decoration: AppTheme.cardDecoration(isDark),
           child: Row(
             children: [
               Container(
-                padding: const EdgeInsets.all(8),
+                width: 46,
+                height: 46,
                 decoration: BoxDecoration(
-                  color: color.withOpacity(0.12),
-                  borderRadius: BorderRadius.circular(10),
+                  color: color.withValues(alpha: 0.1),
+                  shape: BoxShape.circle,
                 ),
-                child: Icon(icon, color: color, size: 20),
+                child: Icon(icon, color: color, size: 22),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -55,16 +53,16 @@ class OperationsTodaySummary extends StatelessWidget {
                     Text(
                       title,
                       style: TextStyle(
-                        fontSize: 14,
+                        fontSize: 15,
                         fontWeight: FontWeight.w600,
-                        color: isDark ? Colors.white : Colors.black87,
+                        color: isDark ? Colors.white : AppTheme.textPrimary,
                       ),
                     ),
                     const SizedBox(height: 2),
                     Text(
                       isLoading ? 'Loading…' : '$count scheduled today',
                       style: TextStyle(
-                        fontSize: 12,
+                        fontSize: 13,
                         color: isDark ? Colors.grey[400] : Colors.grey[600],
                       ),
                     ),
@@ -85,11 +83,11 @@ class OperationsTodaySummary extends StatelessWidget {
           'Today\'s Operations',
           style: TextStyle(
             fontSize: 18,
-            fontWeight: FontWeight.w700,
-            color: isDark ? Colors.white : Colors.black87,
+            fontWeight: FontWeight.bold,
+            color: isDark ? Colors.white : AppTheme.textPrimary,
           ),
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: 12),
         LayoutBuilder(
           builder: (context, constraints) {
             final isWide = constraints.maxWidth >= 600;
@@ -100,7 +98,7 @@ class OperationsTodaySummary extends StatelessWidget {
                     child: tile(
                       title: 'Incoming Shipments',
                       count: incomingCount,
-                      color: Colors.green,
+                      color: StatusColors.green,
                       icon: Icons.call_received_outlined,
                       onTap: onTapIncoming,
                     ),
@@ -110,7 +108,7 @@ class OperationsTodaySummary extends StatelessWidget {
                     child: tile(
                       title: 'Outgoing Deliveries',
                       count: outgoingCount,
-                      color: Colors.orange,
+                      color: StatusColors.orange,
                       icon: Icons.call_made_outlined,
                       onTap: onTapOutgoing,
                     ),
@@ -124,7 +122,7 @@ class OperationsTodaySummary extends StatelessWidget {
                   tile(
                     title: 'Incoming Shipments',
                     count: incomingCount,
-                    color: Colors.green,
+                    color: StatusColors.green,
                     icon: Icons.call_received_outlined,
                     onTap: onTapIncoming,
                   ),
@@ -132,7 +130,7 @@ class OperationsTodaySummary extends StatelessWidget {
                   tile(
                     title: 'Outgoing Deliveries',
                     count: outgoingCount,
-                    color: Colors.orange,
+                    color: StatusColors.orange,
                     icon: Icons.call_made_outlined,
                     onTap: onTapOutgoing,
                   ),

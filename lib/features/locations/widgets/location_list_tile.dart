@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../core/theme/app_theme.dart';
 import '../models/location_model.dart';
 
 class LocationListTile extends StatelessWidget {
@@ -21,34 +22,21 @@ class LocationListTile extends StatelessWidget {
       borderRadius: BorderRadius.circular(12),
       child: Container(
         margin: const EdgeInsets.only(bottom: 12),
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: isDark ? Colors.grey[850] : Colors.white,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: isDark ? Colors.grey[800]! : Colors.grey[200]!,
-          ),
-          boxShadow: [
-            if (!isDark)
-              BoxShadow(
-                color: const Color(0xFF000000).withOpacity(0.06),
-                offset: const Offset(0, 6),
-                blurRadius: 16,
-                spreadRadius: 2,
-              ),
-          ],
-        ),
+        padding: const EdgeInsets.all(14),
+        decoration: AppTheme.cardDecoration(isDark),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Container(
-              padding: const EdgeInsets.all(10),
+              width: 46,
+              height: 46,
               decoration: BoxDecoration(
-                color: (isDark ? Colors.blue[900] : Colors.blue[50]),
-                borderRadius: BorderRadius.circular(10),
+                color: StatusColors.blue.withValues(alpha: 0.1),
+                shape: BoxShape.circle,
               ),
               child: Icon(Icons.location_on,
-                  color: isDark ? Colors.blue[300] : Colors.blue[700], size: 18),
+                  color: isDark ? StatusColors.infoIcon : StatusColors.blue,
+                  size: 22),
             ),
             const SizedBox(width: 12),
             Expanded(
@@ -60,7 +48,7 @@ class LocationListTile extends StatelessWidget {
                     style: TextStyle(
                       fontSize: 15,
                       fontWeight: FontWeight.w600,
-                      color: isDark ? Colors.white : theme.primaryColor,
+                      color: isDark ? Colors.white : AppTheme.textPrimary,
                       letterSpacing: -0.1,
                     ),
                     maxLines: 1,
@@ -69,7 +57,7 @@ class LocationListTile extends StatelessWidget {
                   const SizedBox(height: 6),
                   Row(
                     children: [
-                      _chip(location.usage.toUpperCase(), isDark),
+                      _chip(location.usage.toUpperCase(), isDark, theme),
                       if (location.parentName != null) ...[
                         const SizedBox(width: 8),
                         Flexible(
@@ -95,19 +83,25 @@ class LocationListTile extends StatelessWidget {
     );
   }
 
-  Widget _chip(String text, bool isDark) {
+  Widget _chip(String text, bool isDark, ThemeData theme) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
-        color: isDark ? Colors.grey[800] : Colors.grey[100],
-        borderRadius: BorderRadius.circular(8),
+        color: isDark
+            ? theme.primaryColor.withValues(alpha: 0.18)
+            : AppTheme.primaryTint,
+        borderRadius: BorderRadius.circular(AppRadius.md),
+        border: Border.all(
+          color: theme.primaryColor.withValues(alpha: 0.35),
+          width: 1,
+        ),
       ),
       child: Text(
         text,
         style: TextStyle(
-          fontSize: 10,
+          fontSize: 12,
           fontWeight: FontWeight.w500,
-          color: isDark ? Colors.grey[300] : Colors.grey[700],
+          color: isDark ? Colors.white : theme.primaryColor,
         ),
       ),
     );

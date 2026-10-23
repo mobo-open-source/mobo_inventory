@@ -2,6 +2,12 @@ import 'package:flutter/foundation.dart';
 import '../services/connectivity_service.dart';
 
 class OdooErrorMapper {
+  /// The message returned when nothing more specific could be determined.
+  /// Exposed so callers (e.g. [OfflineErrorHandler]) can detect "this wasn't
+  /// actually mapped to anything specific" without duplicating the literal.
+  static const String fallbackMessage =
+      'Unexpected server error. Please try again or contact support.';
+
   static String toUserMessage(Object error) {
     final raw = error.toString();
 
@@ -60,7 +66,7 @@ class OdooErrorMapper {
       return 'Database not found. Please verify your database name and server configuration.';
     }
 
-    return 'Unexpected server error. Please try again or contact support.';
+    return fallbackMessage;
   }
 
   static String? _moduleHintForModel(String model) {

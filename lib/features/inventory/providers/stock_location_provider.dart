@@ -4,7 +4,8 @@ import '../services/inventory_service.dart';
 class StockLocationProvider extends ChangeNotifier {
   final InventoryService _service;
 
-  StockLocationProvider({InventoryService? service}) : _service = service ?? InventoryService();
+  StockLocationProvider({InventoryService? service})
+    : _service = service ?? InventoryService();
 
   bool _loading = false;
   String? _error;
@@ -14,8 +15,14 @@ class StockLocationProvider extends ChangeNotifier {
   String? get error => _error;
   List<Map<String, dynamic>> get quants => _quants;
 
-  double get totalOnHand => _quants.fold<double>(0.0, (sum, q) => sum + _toDouble(q['available_quantity'] ?? q['quantity']));
-  double get totalReserved => _quants.fold<double>(0.0, (sum, q) => sum + _toDouble(q['reserved_quantity']));
+  double get totalOnHand => _quants.fold<double>(
+    0.0,
+    (sum, q) => sum + _toDouble(q['available_quantity'] ?? q['quantity']),
+  );
+  double get totalReserved => _quants.fold<double>(
+    0.0,
+    (sum, q) => sum + _toDouble(q['reserved_quantity']),
+  );
 
   Future<void> loadForProduct(int productId) async {
     if (_loading) return;

@@ -28,9 +28,7 @@ class AppBarProfileActions extends StatelessWidget {
             final companyName =
                 provider.selectedCompany?['name']?.toString() ?? 'company';
 
-            await context.read<ProfileProvider>().fetchUserProfile(
-              forceRefresh: true,
-            );
+            await context.read<ProfileProvider>().fetchUserProfile();
 
             if (context.mounted) {
               CustomSnackbar.showSuccess(context, 'Switched to $companyName');
@@ -62,9 +60,7 @@ class AppBarProfileActions extends StatelessWidget {
                 onPressed: () {
                   context.pushNamed(AppRoutes.profile).then((_) {
                     if (context.mounted) {
-                      context.read<ProfileProvider>().fetchUserProfile(
-                        forceRefresh: true,
-                      );
+                      context.read<ProfileProvider>().fetchUserProfile();
                     }
                   });
                 },

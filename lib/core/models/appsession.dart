@@ -29,6 +29,7 @@ class AppSessionData {
       expiresAt != null ? DateTime.now().isAfter(expiresAt!) : false;
 
   String get userLogin => odooSession.userLogin;
+  String get userName => odooSession.userName;
   int get userId => odooSession.userId;
   String get sessionId => odooSession.id;
   int get companyId => selectedCompanyId ?? odooSession.companyId;
@@ -80,16 +81,60 @@ class AppSessionData {
       'selected_allowed_company_ids',
       allowedCompanyIds.map((e) => e.toString()).toList(),
     );
+    await prefs.setString('userName', odooSession.userName);
     await prefs.setBool('isLoggedIn', true);
 
+    // Scoped to the database, and the same keys the account switcher reads
+    // (SessionService.retrievePasswordWithMultiplePatterns). The old keys
+    // were not: `session_password_<uid>` is shared by every account with the
+    // same user id — admin is uid 2 on every Odoo database — so saving one
+    // overwrote the other's password.
+    //
+    // Never written when empty: a session restored from a saved session id
+    // carries no password of its own, and writing '' here wiped the real one
+    // — the next launch then found no password and signed the user out, and
+    // the account switcher had nothing left to switch back with.
+    if (password.isEmpty) return;
     await SecureStorageService.instance.storePassword(
-      'session_password_username_${odooSession.userLogin}',
+      'password_${odooSession.userLogin}_$database',
       password,
     );
     await SecureStorageService.instance.storePassword(
-      'session_password_${odooSession.userId}',
+      'password_${odooSession.userId}_$database',
       password,
     );
+  }
+
+  /// The current session's password, from the database-scoped keys, falling
+  /// back to the legacy unscoped ones an older install wrote. A legacy hit is
+  /// re-saved under the scoped keys, so an existing sign-in survives the
+  /// upgrade instead of being treated as missing its password.
+  static Future<String?> _loadPassword({
+    required String userLogin,
+    required int userId,
+    required String database,
+  }) async {
+    final storage = SecureStorageService.instance;
+    for (final key in [
+      'password_${userLogin}_$database',
+      'password_${userId}_$database',
+    ]) {
+      final value = await storage.getPassword(key);
+      if (value != null && value.isNotEmpty) return value;
+    }
+
+    for (final key in [
+      'session_password_username_$userLogin',
+      'session_password_$userId',
+    ]) {
+      final value = await storage.getPassword(key);
+      if (value != null && value.isNotEmpty) {
+        await storage.storePassword('password_${userLogin}_$database', value);
+        await storage.storePassword('password_${userId}_$database', value);
+        return value;
+      }
+    }
+    return null;
   }
 
   /// Loads the session data from [SharedPreferences] and secure storage.
@@ -115,14 +160,11 @@ class AppSessionData {
       serverUrl = 'https://$serverUrl';
     }
 
-    String? password = await SecureStorageService.instance.getPassword(
-      'session_password_username_$userLogin',
+    final password = await _loadPassword(
+      userLogin: userLogin!,
+      userId: userId!,
+      database: database!,
     );
-    if (password == null || password.isEmpty) {
-      password = await SecureStorageService.instance.getPassword(
-        'session_password_$userId',
-      );
-    }
     if (password == null || password.isEmpty) return null;
 
     DateTime? expiresAt;
@@ -147,16 +189,16 @@ class AppSessionData {
 
     final odooSession = OdooSession(
       id: sessionId!,
-      userId: userId!,
+      userId: userId,
       partnerId: 0,
       companyId: companyId ?? 0,
       allowedCompanies: [],
-      userLogin: userLogin!,
-      userName: '',
+      userLogin: userLogin,
+      userName: prefs.getString('userName') ?? '',
       userLang: 'en_US',
       userTz: 'UTC',
       isSystem: false,
-      dbName: database!,
+      dbName: database,
       serverVersion: serverVersion,
     );
 
@@ -164,7 +206,7 @@ class AppSessionData {
       odooSession: odooSession,
       password: password,
       serverUrl: serverUrl,
-      database: database!,
+      database: database,
       expiresAt: expiresAt,
       selectedCompanyId: companyId,
       allowedCompanyIds: allowed,

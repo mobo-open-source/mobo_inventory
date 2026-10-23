@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/theme/app_theme.dart';
+
 /// A tile widget displaying stock quantity information for a specific location.
 class LocationTile extends StatelessWidget {
   final bool isDark;
@@ -24,22 +26,7 @@ class LocationTile extends StatelessWidget {
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-      decoration: BoxDecoration(
-        color: isDark ? Colors.grey[850] : Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: isDark ? Colors.grey[850]! : Colors.grey[200]!,
-          width: 0.5,
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: const Color(0xFF000000).withOpacity(0.05),
-            blurRadius: 16,
-            offset: const Offset(0, 6),
-            spreadRadius: 2,
-          ),
-        ],
-      ),
+      decoration: AppTheme.cardDecoration(isDark),
       child: LayoutBuilder(
         builder: (context, constraints) {
           final isWide = constraints.maxWidth >= 520;

@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:hugeicons/hugeicons.dart';
+import '../../../core/theme/app_theme.dart';
 
 class FullImageScreen extends StatefulWidget {
   final Uint8List imageBytes;
@@ -58,7 +59,6 @@ class _FullImageScreenState extends State<FullImageScreen> {
     final displayTitle = _getDisplayTitle();
 
     return Scaffold(
-      backgroundColor: isDark ? Colors.grey[900] : Colors.grey[50],
       appBar: AppBar(
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -115,7 +115,9 @@ class _FullImageScreenState extends State<FullImageScreen> {
                     errorBuilder: (context, error, stackTrace) => Center(
                       child: Icon(
                         Icons.error,
-                        color: isDark ? Colors.red[300] : Colors.red,
+                        color: isDark
+                            ? StatusColors.errorIcon
+                            : StatusColors.red,
                         size: 48,
                       ),
                     ),

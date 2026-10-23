@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:hugeicons/hugeicons.dart';
 import '../../../core/exceptions/odoo_error_mapper.dart';
 import '../../../core/services/connectivity_service.dart';
+import '../theme/app_theme.dart';
 
 /// Centralized manager for analyzing and mapping errors to user-friendly messages.
 class ErrorManager {
@@ -19,7 +20,7 @@ class ErrorManager {
         title: 'No Internet Connection',
         message: 'Please check your Wi-Fi or mobile data and try again.',
         icon: Icons.wifi_off_rounded,
-        color: Colors.blue.shade700,
+        color: StatusColors.blue,
       );
     }
 
@@ -30,7 +31,23 @@ class ErrorManager {
         message:
             'Cannot connect to the server. Please check your network connection and server URL.',
         icon: Icons.cloud_off_rounded,
-        color: Colors.orange.shade700,
+        color: StatusColors.orange,
+      );
+    }
+
+    // Errors are frequently stored as already-stringified text (e.g.
+    // provider `_error` fields), which loses the typed exception checks
+    // above — fall back to recognizing common network-failure text so a
+    // dropped connection still gets a "can't reach server" message instead
+    // of the generic server-error fallback below.
+    if (_isNetworkError(errorString)) {
+      return ErrorInfo(
+        type: ErrorType.network,
+        title: 'Connection Problem',
+        message:
+            'Could not reach the server. Please check your internet connection and try again.',
+        icon: Icons.cloud_off_rounded,
+        color: StatusColors.orange,
       );
     }
 
@@ -41,7 +58,7 @@ class ErrorManager {
         message:
             'Your session has expired or credentials are invalid. Please sign in again.',
         icon: HugeIcons.strokeRoundedLockPassword,
-        color: Colors.red.shade700,
+        color: StatusColors.red,
       );
     }
 
@@ -52,7 +69,7 @@ class ErrorManager {
         message:
             'You don\'t have permission to access this feature. Please contact your administrator.',
         icon: Icons.block_rounded,
-        color: Colors.red.shade700,
+        color: StatusColors.red,
       );
     }
 
@@ -61,7 +78,7 @@ class ErrorManager {
       title: 'Server Error',
       message: OdooErrorMapper.toUserMessage(error),
       icon: Icons.error_outline_rounded,
-      color: Colors.red.shade700,
+      color: StatusColors.red,
     );
   }
 
@@ -84,6 +101,17 @@ class ErrorManager {
             (lowerError.contains('stock') || lowerError.contains('product')) ||
         lowerError.contains('required app') ||
         lowerError.contains('required module');
+  }
+
+  static bool _isNetworkError(String error) {
+    final lowerError = error.toLowerCase();
+    return lowerError.contains('socketexception') ||
+        lowerError.contains('connection refused') ||
+        lowerError.contains('connection reset') ||
+        lowerError.contains('failed host lookup') ||
+        lowerError.contains('network is unreachable') ||
+        lowerError.contains('timeoutexception') ||
+        lowerError.contains('timed out');
   }
 
   static bool _isAuthError(String error) {
@@ -168,7 +196,7 @@ class ErrorManager {
           'This feature needs the "$displayModuleName" app to be installed on your Odoo server.\n\n'
           'Please contact your administrator to install the required app.',
       icon: Icons.extension_off_rounded,
-      color: Colors.orange.shade700,
+      color: StatusColors.orange,
       moduleName: displayModuleName,
       modelName: modelName,
     );

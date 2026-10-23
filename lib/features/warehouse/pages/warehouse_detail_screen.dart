@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:hugeicons/hugeicons.dart';
 import 'package:provider/provider.dart';
+import '../../../core/theme/app_theme.dart';
 import '../providers/warehouse_detail_provider.dart';
 
 /// A screen displaying the comprehensive profile and configuration of a warehouse.
@@ -33,9 +34,6 @@ class _WarehouseDetailScreenState extends State<WarehouseDetailScreen> {
     final scheme = theme.colorScheme;
 
     return Scaffold(
-      backgroundColor: isDark
-          ? const Color(0xFF121212)
-          : const Color(0xFFF5F5F5),
       appBar: AppBar(
         backgroundColor: theme.scaffoldBackgroundColor,
         elevation: 0,
@@ -68,7 +66,7 @@ class _WarehouseDetailScreenState extends State<WarehouseDetailScreen> {
                   padding: const EdgeInsets.all(24),
                   child: Text(
                     provider.error!,
-                    style: const TextStyle(color: Colors.red),
+                    style: const TextStyle(color: StatusColors.red),
                   ),
                 ),
               );
@@ -184,15 +182,9 @@ class _WarehouseDetailScreenState extends State<WarehouseDetailScreen> {
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 10,
-            offset: const Offset(0, 2),
-          ),
-        ],
+        color: isDark ? AppTheme.darkSurface : Colors.white,
+        borderRadius: BorderRadius.circular(AppRadius.lg),
+        boxShadow: AppShadows.panel(isDark),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,

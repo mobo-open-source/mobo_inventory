@@ -1,14 +1,22 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:hugeicons/hugeicons.dart';
 import 'package:provider/provider.dart';
 import '../providers/transfer_provider.dart';
 import '../../dashboard/providers/last_opened_provider.dart';
+import '../../../core/services/review_service.dart';
+import '../../../core/theme/app_theme.dart';
+import '../../../main.dart';
 import '../../dashboard/providers/dashboard_provider.dart';
 import '../models/transfer_model.dart';
-import '../../../shared/widgets/forms/overlay_dropdown.dart';
+import '../utils/transfer_state_helper.dart';
+import '../../../shared/widgets/cards/status_info_card.dart';
+import '../../../shared/widgets/forms/mobo_typeahead_dropdown_field.dart';
+import '../../../shared/widgets/forms/mobo_date_picker.dart';
+import '../../../shared/widgets/forms/mobo_product_search_field.dart';
 import '../../../shared/widgets/dialogs/loading_dialog.dart';
 import '../../../shared/widgets/dialogs/quantity_dialog.dart';
-import '../../../shared/widgets/bottom_sheets/product_selector_bottom_sheet.dart';
 import '../../../shared/widgets/snackbars/custom_snackbar.dart';
 import '../../../shared/widgets/dialogs/confirm_discard_dialog.dart';
 import '../../../shared/widgets/dialogs/common_dialog.dart';
@@ -85,6 +93,8 @@ class _TransferFormScreenState extends State<TransferFormScreen> {
       }
     }
 
+    _captureBaseline();
+
     WidgetsBinding.instance.addPostFrameCallback((_) => _loadInitialData());
   }
 
@@ -107,15 +117,18 @@ class _TransferFormScreenState extends State<TransferFormScreen> {
 
       if (_isEditMode && widget.transfer != null) {
         await _loadTransferDetails();
-      } else {
+      } else if (mounted) {
         _autoSelectInternalTransferType(provider);
       }
 
+      if (!mounted) return;
       setState(() {
         _dropdownsLoading = false;
         _error = null;
+        _captureBaseline();
       });
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _dropdownsLoading = false;
         _error = 'Failed to load form data. Please try again.';
@@ -177,26 +190,52 @@ class _TransferFormScreenState extends State<TransferFormScreen> {
     }
   }
 
+  /// Snapshot of the form as the user first sees it, taken once loading
+  /// settles. Diffing against this — rather than against widget.transfer —
+  /// means values the form fills in by itself (the auto-selected transfer
+  /// type, everything refreshed from the server) count as the starting
+  /// point rather than as edits, and no date/string formats have to line up.
+  int? _baselinePickingTypeId;
+  int? _baselineLocationId;
+  int? _baselineLocationDestId;
+  DateTime? _baselineScheduledDate;
+  String _baselineLines = '';
+
+  String _linesSignature() => _transferLines
+      .map((l) => '${l['product_id']}:${l['quantity']}:${l['unit_price']}')
+      .join('|');
+
+  void _captureBaseline() {
+    _baselinePickingTypeId = _selectedPickingTypeId;
+    _baselineLocationId = _selectedLocationId;
+    _baselineLocationDestId = _selectedLocationDestId;
+    _baselineScheduledDate = _scheduledDate;
+    _baselineLines = _linesSignature();
+  }
+
   bool get _hasUnsavedChanges {
     if (_dropdownsLoading || _hasBeenSaved) return false;
 
-    if (!_isEditMode) {
-      return _selectedPickingTypeId != null ||
-          _selectedLocationId != null ||
-          _selectedLocationDestId != null ||
-          _scheduledDate != null ||
-          _transferLines.isNotEmpty;
-    }
-
-    final t = widget.transfer;
-
-    final baselineLines = (t?.moveLines ?? const []);
-    return _selectedLocationId != t?.locationId ||
-        _selectedLocationDestId != t?.locationDestId ||
-        _scheduledDate?.toIso8601String() != t?.scheduledDate ||
-        (baselineLines.isNotEmpty &&
-            _transferLines.length != baselineLines.length);
+    return _selectedPickingTypeId != _baselinePickingTypeId ||
+        _selectedLocationId != _baselineLocationId ||
+        _selectedLocationDestId != _baselineLocationDestId ||
+        _scheduledDate != _baselineScheduledDate ||
+        _linesSignature() != _baselineLines;
   }
+
+  bool get _requiredFieldsFilled =>
+      _selectedLocationId != null &&
+      _selectedLocationDestId != null &&
+      (_isEditMode || _selectedPickingTypeId != null);
+
+  bool get _canSave =>
+      !_isLoading &&
+      !_isReadOnly &&
+      // A created transfer is never created a second time from this form.
+      !(_hasBeenSaved && !_isEditMode) &&
+      _transferLines.isNotEmpty &&
+      _requiredFieldsFilled &&
+      (!_isEditMode || _hasUnsavedChanges);
 
   Future<bool> _handleWillPop() async {
     if (!_hasUnsavedChanges) return true;
@@ -213,36 +252,28 @@ class _TransferFormScreenState extends State<TransferFormScreen> {
     return shouldPop ?? false;
   }
 
-  void _addProductLine() async {
+  void _onProductAdded(Map<String, dynamic> picked) {
     if (_isReadOnly) {
       _showMessage('Cannot edit a completed transfer', isError: true);
       return;
     }
 
-    final picked = await ProductSelectorBottomSheet.show(
-      context,
-      title: 'Select Product',
-    );
+    final selectedProduct = picked['product'] as Map<String, dynamic>;
+    final quantity = (picked['quantity'] as num?)?.toDouble() ?? 1.0;
+    final price = (selectedProduct['list_price'] as num?)?.toDouble() ?? 0.0;
 
-    if (picked != null && mounted) {
-      final selectedProduct = picked['product'] as Map<String, dynamic>;
-      final quantity = (picked['quantity'] as num?)?.toDouble() ?? 1.0;
-
-      final price = (selectedProduct['list_price'] as num?)?.toDouble() ?? 0.0;
-
-      setState(() {
-        _transferLines.add({
-          'product_id': selectedProduct['id'],
-          'product_name': selectedProduct['name'],
-          'product_uom': selectedProduct['uom_id'] is List
-              ? (selectedProduct['uom_id'] as List)[0]
-              : 1,
-          'quantity': quantity,
-          'unit_price': price,
-        });
-        HapticsService.light();
+    setState(() {
+      _transferLines.add({
+        'product_id': selectedProduct['id'],
+        'product_name': selectedProduct['name'],
+        'product_uom': selectedProduct['uom_id'] is List
+            ? (selectedProduct['uom_id'] as List)[0]
+            : 1,
+        'quantity': quantity,
+        'unit_price': price,
       });
-    }
+      HapticsService.light();
+    });
   }
 
   void _removeProductLine(int index) {
@@ -271,35 +302,6 @@ class _TransferFormScreenState extends State<TransferFormScreen> {
         _transferLines[index]['quantity'] = newQty;
       });
       HapticsService.light();
-    }
-  }
-
-  Future<void> _changeProduct(int index) async {
-    if (_isReadOnly) {
-      _showMessage('Cannot edit a completed transfer', isError: true);
-      return;
-    }
-
-    final picked = await ProductSelectorBottomSheet.show(
-      context,
-      title: 'Select Product',
-    );
-    if (picked != null) {
-      final selectedProduct = picked['product'] as Map<String, dynamic>;
-      final quantity = (picked['quantity'] as num?)?.toDouble();
-      final price = (selectedProduct['list_price'] as num?)?.toDouble() ?? 0.0;
-
-      setState(() {
-        _transferLines[index]['product_id'] = selectedProduct['id'];
-        _transferLines[index]['product_name'] = selectedProduct['name'];
-        _transferLines[index]['product_uom'] = selectedProduct['uom_id'] is List
-            ? (selectedProduct['uom_id'] as List)[0]
-            : 1;
-        _transferLines[index]['unit_price'] = price;
-        if (quantity != null && quantity > 0) {
-          _transferLines[index]['quantity'] = quantity;
-        }
-      });
     }
   }
 
@@ -343,16 +345,18 @@ class _TransferFormScreenState extends State<TransferFormScreen> {
           if (success) {
             setState(() => _hasBeenSaved = true);
 
-            try {
-              await context.read<DashboardProvider>().fetchStats(
-                forceRefresh: true,
-              );
-            } catch (_) {}
-            Navigator.pop(context, {
+            unawaited(_refreshDashboard(context.read<DashboardProvider>()));
+            _popSelf({
               'success': true,
               'message': 'Transfer updated successfully',
             });
             HapticsService.success();
+          } else {
+            _showMessage(
+              provider.error ?? 'Failed to update transfer',
+              isError: true,
+            );
+            HapticsService.error();
           }
         }
       } else {
@@ -373,42 +377,46 @@ class _TransferFormScreenState extends State<TransferFormScreen> {
             final markAsTodo = await _showMarkAsTodoDialog();
 
             String successMessage = 'Transfer created successfully';
+            bool markFailed = false;
 
             if (markAsTodo == true && mounted) {
               final markedSuccess = await _performMarkAsTodo(pickingId);
-              if (markedSuccess) {
-                successMessage =
-                    'Transfer created and marked as todo successfully';
-              }
+              markFailed = !markedSuccess;
+              successMessage = markedSuccess
+                  ? 'Transfer created and marked as todo successfully'
+                  : 'Transfer created, but it could not be marked as todo';
             }
 
             if (mounted) {
-              try {
-                final newTransfer = await provider.fetchTransferDetails(
+              // Recorded after the form closes: awaiting these first left
+              // the form open and interactive for a dozen RPCs, and a back
+              // press in that window made the late pop close the page below
+              // it instead — blanking the app.
+              unawaited(
+                _recordCreatedTransfer(
                   pickingId,
-                );
-                if (newTransfer != null && mounted) {
-                  context.read<LastOpenedProvider>().trackTransferAccess(
-                    transferId: newTransfer.id.toString(),
-                    transferName: newTransfer.name,
-                    state: newTransfer.state,
-                    transferData: newTransfer.toJson(),
-                  );
+                  provider,
+                  context.read<LastOpenedProvider>(),
+                  context.read<DashboardProvider>(),
+                ),
+              );
+
+              _popSelf({
+                'success': true,
+                'message': successMessage,
+                if (markFailed) 'warning': true,
+              });
+
+              ReviewService().trackSignificantEvent();
+              // Let the success snackbar (a dialog route) dismiss itself
+              // before the rating dialog is pushed, so its timer can't pop
+              // the wrong route.
+              Future.delayed(const Duration(milliseconds: 3500), () {
+                final targetContext = navigatorKey.currentContext;
+                if (targetContext != null && targetContext.mounted) {
+                  ReviewService().checkAndShowRating(targetContext);
                 }
-              } catch (e) {}
-
-              if (mounted) {
-                try {
-                  await context.read<DashboardProvider>().fetchStats(
-                    forceRefresh: true,
-                  );
-                } catch (_) {}
-
-                Navigator.pop(context, {
-                  'success': true,
-                  'message': successMessage,
-                });
-              }
+              });
               HapticsService.success();
             }
           }
@@ -455,6 +463,9 @@ class _TransferFormScreenState extends State<TransferFormScreen> {
     );
   }
 
+  /// The dashboard is refreshed once the form has closed; the failure is
+  /// reported by the screen the form returns to, since closing the form
+  /// would close a snackbar shown here.
   Future<bool> _performMarkAsTodo(int transferId) async {
     LoadingDialog.show(context, message: 'Marking as todo...');
 
@@ -462,23 +473,54 @@ class _TransferFormScreenState extends State<TransferFormScreen> {
       final provider = context.read<TransferProvider>();
       await provider.markAsTodo(transferId);
 
-      if (mounted) {
-        LoadingDialog.hide(context);
-
-        try {
-          await context.read<DashboardProvider>().fetchStats(
-            forceRefresh: true,
-          );
-        } catch (_) {}
-      }
+      if (mounted) LoadingDialog.hide(context);
       return true;
     } catch (e) {
-      if (mounted) {
-        LoadingDialog.hide(context);
-        _showMessage('Failed to mark as todo: $e', isError: true);
-      }
+      if (mounted) LoadingDialog.hide(context);
       return false;
     }
+  }
+
+  /// Closes this form with [result] — and only this form. `Navigator.pop`
+  /// closes whatever route is on top, so after a back press (the form
+  /// already closing) or with a dialog or picker above it, it closed the
+  /// wrong route: the shell page below, leaving the app blank.
+  void _popSelf(Object? result) {
+    if (!mounted) return;
+    final route = ModalRoute.of(context);
+    if (route == null || !route.isActive) return;
+    final navigator = Navigator.of(context);
+    navigator.popUntil((r) => r == route);
+    if (route.isCurrent) navigator.pop(result);
+  }
+
+  static Future<void> _refreshDashboard(DashboardProvider dashboard) async {
+    try {
+      await dashboard.fetchStats(forceRefresh: true);
+    } catch (_) {}
+  }
+
+  /// Adds the new transfer to "Recently opened" and refreshes the
+  /// dashboard. Takes the providers rather than reading them from
+  /// `context`, which is gone by the time this finishes.
+  static Future<void> _recordCreatedTransfer(
+    int pickingId,
+    TransferProvider transfers,
+    LastOpenedProvider lastOpened,
+    DashboardProvider dashboard,
+  ) async {
+    try {
+      final newTransfer = await transfers.fetchTransferDetails(pickingId);
+      if (newTransfer != null) {
+        await lastOpened.trackTransferAccess(
+          transferId: newTransfer.id.toString(),
+          transferName: newTransfer.name,
+          state: newTransfer.state,
+          transferData: newTransfer.toJson(),
+        );
+      }
+    } catch (_) {}
+    await _refreshDashboard(dashboard);
   }
 
   void _showMessage(String message, {bool isError = false}) {
@@ -505,13 +547,13 @@ class _TransferFormScreenState extends State<TransferFormScreen> {
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         color: isDark
-            ? Colors.white.withOpacity(.1)
-            : Colors.blue.withOpacity(0.1),
+            ? Colors.white.withValues(alpha: .1)
+            : StatusColors.blue.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
           color: isDark
-              ? Colors.white.withOpacity(.3)
-              : Colors.blue.withOpacity(0.3),
+              ? Colors.white.withValues(alpha: .3)
+              : StatusColors.blue.withValues(alpha: 0.3),
         ),
       ),
       child: Column(
@@ -551,7 +593,7 @@ class _TransferFormScreenState extends State<TransferFormScreen> {
             fontSize: isTotal ? 18 : 16,
             fontWeight: isTotal ? FontWeight.bold : FontWeight.w500,
             color: isTotal
-                ? Colors.blue
+                ? StatusColors.blue
                 : (isDark ? Colors.grey[300] : Colors.grey[700]),
           ),
         ),
@@ -565,21 +607,22 @@ class _TransferFormScreenState extends State<TransferFormScreen> {
     final theme = Theme.of(context);
 
     return PopScope(
-      canPop: !_hasUnsavedChanges,
+      // Not while saving: the save pops the form itself when it is done.
+      canPop: !_isLoading && !_hasUnsavedChanges,
       onPopInvoked: (didPop) async {
-        if (didPop) return;
+        if (didPop || _isLoading) return;
         final shouldPop = await _handleWillPop();
         if (shouldPop && mounted) {
           Navigator.of(context).pop();
         }
       },
       child: Scaffold(
-        backgroundColor: isDark ? const Color(0xFF121212) : Colors.white,
         appBar: AppBar(
-          backgroundColor: isDark ? const Color(0xFF121212) : Colors.white,
+          backgroundColor: theme.scaffoldBackgroundColor,
           elevation: 0,
           leading: IconButton(
             onPressed: () async {
+              if (_isLoading) return;
               if (_hasUnsavedChanges) {
                 final shouldPop = await _handleWillPop();
                 if (shouldPop && mounted) Navigator.pop(context);
@@ -604,11 +647,17 @@ class _TransferFormScreenState extends State<TransferFormScreen> {
           ),
           actions: [
             if (!_isReadOnly)
-              IconButton(
-                onPressed: () {
-                  _loadInitialData();
-                },
-                icon: Icon(Icons.refresh, color: theme.primaryColor),
+              Padding(
+                padding: const EdgeInsets.only(right: 10),
+                child: IconButton(
+                  onPressed: () {
+                    _loadInitialData();
+                  },
+                  icon: Icon(
+                    Icons.refresh,
+                    color: isDark ? Colors.white : Colors.black,
+                  ),
+                ),
               ),
           ],
         ),
@@ -637,11 +686,9 @@ class _TransferFormScreenState extends State<TransferFormScreen> {
                 ),
                 child: SizedBox(
                   width: double.infinity,
-                  height: 56,
+                  height: 48,
                   child: ElevatedButton.icon(
-                    onPressed: (_transferLines.isEmpty || _isLoading)
-                        ? null
-                        : _saveTransfer,
+                    onPressed: _canSave ? _saveTransfer : null,
                     icon: _isLoading
                         ? const SizedBox(
                             width: 20,
@@ -657,7 +704,6 @@ class _TransferFormScreenState extends State<TransferFormScreen> {
                             _isEditMode
                                 ? HugeIcons.strokeRoundedFileEdit
                                 : HugeIcons.strokeRoundedFileAdd,
-                            color: Colors.white,
                             size: 20,
                           ),
                     label: Text(
@@ -670,13 +716,18 @@ class _TransferFormScreenState extends State<TransferFormScreen> {
                                 : 'Create Transfer'),
                       style: const TextStyle(
                         fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
                       ),
                     ),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: theme.primaryColor,
                       foregroundColor: Colors.white,
+                      disabledBackgroundColor: isDark
+                          ? Colors.grey[700]
+                          : Colors.grey[300],
+                      disabledForegroundColor: isDark
+                          ? Colors.grey[400]
+                          : Colors.grey[500],
                       elevation: 0,
                       shadowColor: Colors.transparent,
                       shape: RoundedRectangleBorder(
@@ -697,7 +748,7 @@ class _TransferFormScreenState extends State<TransferFormScreen> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.error_outline, size: 64, color: Colors.red[300]),
+            Icon(Icons.error_outline, size: 64, color: StatusColors.errorIcon),
             const SizedBox(height: 16),
             Text(
               _error!,
@@ -727,31 +778,46 @@ class _TransferFormScreenState extends State<TransferFormScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                if (_isEditMode && widget.transfer != null) ...[
+                  StatusInfoCard(
+                    title: widget.transfer!.name,
+                    subtitle: widget.transfer!.pickingTypeName ?? 'Internal',
+                    statusLabel: TransferStateHelper.getStateLabel(
+                      widget.transfer!.state,
+                    ),
+                    statusColor: TransferStateHelper.getStateColor(
+                      widget.transfer!.state,
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                ],
+
                 _buildProfessionalCard(
                   title: 'Transfer Details',
                   icon: HugeIcons.strokeRoundedFile02,
                   children: [
                     if (!_isEditMode) ...[
-                      OverlayDropdownField<int>(
-                        value: _selectedPickingTypeId,
-                        labelText: 'Transfer Type *',
+                      MoboTypeaheadDropdownField<int>(
+                        label: 'Transfer Type',
+                        isRequired: true,
                         hintText: 'Select transfer type',
                         isDark: isDark,
-                        options: provider.pickingTypes.map((pt) {
-                          final label = (() {
-                            final dn = pt['display_name'];
-                            final dnStr = dn == null
-                                ? ''
-                                : dn.toString().trim();
-                            if (dnStr.isNotEmpty) return dnStr;
-                            final n = pt['name'];
-                            return n == null ? 'Unknown' : n.toString();
-                          })();
-                          return OverlayDropdownOption<int>(
-                            value: pt['id'] as int,
-                            label: label,
+                        selectedItem: _selectedPickingTypeId,
+                        items: [
+                          for (final pt in provider.pickingTypes)
+                            pt['id'] as int,
+                        ],
+                        displayText: (id) {
+                          final pt = provider.pickingTypes.firstWhere(
+                            (e) => (e['id'] as int) == id,
+                            orElse: () => <String, dynamic>{},
                           );
-                        }).toList(),
+                          final dn = pt['display_name'];
+                          final dnStr = dn == null ? '' : dn.toString().trim();
+                          if (dnStr.isNotEmpty) return dnStr;
+                          final n = pt['name'];
+                          return n == null ? 'Unknown' : n.toString();
+                        },
                         onChanged: (value) {
                           setState(() {
                             _selectedPickingTypeId = value;
@@ -780,52 +846,61 @@ class _TransferFormScreenState extends State<TransferFormScreen> {
                             }
                           });
                         },
-                        validator: (v) => v == null ? 'Required' : null,
                       ),
                       const SizedBox(height: 12),
                     ],
 
-                    OverlayDropdownField<int>(
-                      value: _selectedLocationId,
-                      labelText: 'Source Location *',
-                      hintText: 'Select source location',
-                      isDark: isDark,
-                      enabled: !_isReadOnly,
-                      options: provider.locations.map((loc) {
-                        final label =
-                            loc['complete_name']?.toString() ??
-                            loc['name']?.toString() ??
-                            'Unknown';
-                        return OverlayDropdownOption<int>(
-                          value: loc['id'] as int,
-                          label: label,
-                        );
-                      }).toList(),
-                      onChanged: (value) =>
-                          setState(() => _selectedLocationId = value),
-                      validator: (v) => v == null ? 'Required' : null,
+                    IgnorePointer(
+                      ignoring: _isReadOnly,
+                      child: MoboTypeaheadDropdownField<int>(
+                        label: 'Source Location',
+                        isRequired: true,
+                        hintText: 'Select source location',
+                        isDark: isDark,
+                        selectedItem: _selectedLocationId,
+                        items: [
+                          for (final loc in provider.locations)
+                            loc['id'] as int,
+                        ],
+                        displayText: (id) {
+                          final loc = provider.locations.firstWhere(
+                            (e) => e['id'] == id,
+                            orElse: () => <String, dynamic>{},
+                          );
+                          return loc['complete_name']?.toString() ??
+                              loc['name']?.toString() ??
+                              'Unknown';
+                        },
+                        onChanged: (value) =>
+                            setState(() => _selectedLocationId = value),
+                      ),
                     ),
                     const SizedBox(height: 12),
 
-                    OverlayDropdownField<int>(
-                      value: _selectedLocationDestId,
-                      labelText: 'Destination Location *',
-                      hintText: 'Select destination location',
-                      isDark: isDark,
-                      enabled: !_isReadOnly,
-                      options: provider.locations.map((loc) {
-                        final label =
-                            loc['complete_name']?.toString() ??
-                            loc['name']?.toString() ??
-                            'Unknown';
-                        return OverlayDropdownOption<int>(
-                          value: loc['id'] as int,
-                          label: label,
-                        );
-                      }).toList(),
-                      onChanged: (value) =>
-                          setState(() => _selectedLocationDestId = value),
-                      validator: (v) => v == null ? 'Required' : null,
+                    IgnorePointer(
+                      ignoring: _isReadOnly,
+                      child: MoboTypeaheadDropdownField<int>(
+                        label: 'Destination Location',
+                        isRequired: true,
+                        hintText: 'Select destination location',
+                        isDark: isDark,
+                        selectedItem: _selectedLocationDestId,
+                        items: [
+                          for (final loc in provider.locations)
+                            loc['id'] as int,
+                        ],
+                        displayText: (id) {
+                          final loc = provider.locations.firstWhere(
+                            (e) => e['id'] == id,
+                            orElse: () => <String, dynamic>{},
+                          );
+                          return loc['complete_name']?.toString() ??
+                              loc['name']?.toString() ??
+                              'Unknown';
+                        },
+                        onChanged: (value) =>
+                            setState(() => _selectedLocationDestId = value),
+                      ),
                     ),
                     const SizedBox(height: 12),
 
@@ -836,44 +911,29 @@ class _TransferFormScreenState extends State<TransferFormScreen> {
                 _buildProfessionalCard(
                   title: 'Products',
                   icon: HugeIcons.strokeRoundedShoppingBasket01,
+                  trailing: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 4,
+                    ),
+                    decoration: BoxDecoration(
+                      color: isDark ? Colors.grey[800]! : Colors.grey[200]!,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Text(
+                      '${_transferLines.length}',
+                      style: TextStyle(
+                        color: isDark ? Colors.grey[400]! : Colors.grey[600]!,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
                   children: [
                     if (!_isReadOnly)
-                      SizedBox(
-                        width: double.infinity,
-                        height: 56,
-                        child: ElevatedButton(
-                          onPressed: _addProductLine,
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: isDark
-                                ? Colors.grey[700]
-                                : Colors.grey[200],
-                            foregroundColor: isDark
-                                ? Colors.white
-                                : Colors.grey[800],
-                            elevation: 0,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                          ),
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(
-                                HugeIcons.strokeRoundedShoppingBagAdd,
-                                size: 20,
-                                color: isDark ? Colors.white : Colors.black,
-                              ),
-                              const SizedBox(width: 8),
-                              const Text(
-                                'Add Product',
-                                style: TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
+                      MoboProductSearchField(
+                        isDark: isDark,
+                        onProductAdded: _onProductAdded,
                       ),
                     const SizedBox(height: 20),
                     if (_transferLines.isEmpty)
@@ -911,7 +971,7 @@ class _TransferFormScreenState extends State<TransferFormScreen> {
                             ),
                             const SizedBox(height: 8),
                             Text(
-                              'Tap "Add Product" to get started',
+                              'Search above to add your first product',
                               style: TextStyle(
                                 fontSize: 14,
                                 color: isDark
@@ -946,10 +1006,9 @@ class _TransferFormScreenState extends State<TransferFormScreen> {
                           }),
                           if (_isAddingLine) ...[
                             const SizedBox(height: 8),
-                            Card(
+                            Container(
                               margin: const EdgeInsets.only(bottom: 8),
-                              elevation: 0,
-                              color: isDark ? Colors.grey[850] : Colors.white,
+                              decoration: AppTheme.cardDecoration(isDark),
                               child: const Padding(
                                 padding: EdgeInsets.all(16),
                                 child: Row(
@@ -991,25 +1050,14 @@ class _TransferFormScreenState extends State<TransferFormScreen> {
     required String title,
     required List<Widget> children,
     IconData? icon,
+    Widget? trailing,
     bool showDivider = true,
   }) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 24),
-      decoration: BoxDecoration(
-        color: isDark ? Colors.grey[850] : Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: isDark
-                ? Colors.black.withOpacity(0.18)
-                : Colors.black.withOpacity(0.06),
-            blurRadius: 12,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
+      decoration: AppTheme.panelDecoration(isDark),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -1027,11 +1075,12 @@ class _TransferFormScreenState extends State<TransferFormScreen> {
                   title,
                   style: TextStyle(
                     fontSize: 18,
-                    fontWeight: FontWeight.w600,
+                    fontWeight: FontWeight.bold,
                     color: isDark ? Colors.white : Colors.grey[900],
                     letterSpacing: -0.3,
                   ),
                 ),
+                if (trailing != null) ...[const Spacer(), trailing],
               ],
             ),
           ),
@@ -1059,9 +1108,9 @@ class _TransferFormScreenState extends State<TransferFormScreen> {
         Text(
           'Scheduled Date',
           style: TextStyle(
-            color: isDark ? Colors.white70 : const Color(0xff7F7F7F),
-            fontSize: 14,
-            fontWeight: FontWeight.w400,
+            color: isDark ? Colors.white : AppTheme.textPrimary,
+            fontSize: 16,
+            fontWeight: FontWeight.normal,
           ),
         ),
         const SizedBox(height: 8),
@@ -1069,7 +1118,7 @@ class _TransferFormScreenState extends State<TransferFormScreen> {
           onTap: _isReadOnly
               ? null
               : () async {
-                  final date = await showDatePicker(
+                  final date = await MoboDatePicker.show(
                     context: context,
                     initialDate: _scheduledDate ?? DateTime.now(),
                     firstDate: DateTime.now(),
@@ -1082,8 +1131,8 @@ class _TransferFormScreenState extends State<TransferFormScreen> {
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
             decoration: BoxDecoration(
-              color: isDark ? const Color(0xFF2A2A2A) : const Color(0xffF8FAFB),
-              borderRadius: BorderRadius.circular(12),
+              color: isDark ? Colors.grey[850] : AppTheme.inputFill,
+              borderRadius: BorderRadius.circular(AppRadius.md),
             ),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -1092,10 +1141,13 @@ class _TransferFormScreenState extends State<TransferFormScreen> {
                   _scheduledDate == null
                       ? 'Select date (optional)'
                       : '${_scheduledDate!.day}/${_scheduledDate!.month}/${_scheduledDate!.year}',
-                  style: TextStyle(
+                  // The base style the dropdowns' text is drawn from, so the
+                  // date reads at their size (16) and the box is as tall.
+                  style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                    fontSize: 16,
                     color: _scheduledDate == null
-                        ? (isDark ? Colors.white54 : Colors.grey[600])
-                        : (isDark ? Colors.white70 : const Color(0xff000000)),
+                        ? (isDark ? Colors.grey[400] : Colors.grey[600])
+                        : (isDark ? Colors.white : Colors.black87),
                     fontStyle: _scheduledDate == null
                         ? FontStyle.italic
                         : FontStyle.normal,
@@ -1107,7 +1159,7 @@ class _TransferFormScreenState extends State<TransferFormScreen> {
                 Icon(
                   HugeIcons.strokeRoundedCalendar03,
                   size: 18,
-                  color: isDark ? Colors.white54 : Colors.grey[600],
+                  color: isDark ? Colors.grey[400] : Colors.grey[600],
                 ),
               ],
             ),
@@ -1170,9 +1222,6 @@ class _TransferLineItemState extends State<_TransferLineItem> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final cardColor = widget.isDark ? Colors.grey[850] : Colors.white;
-    final borderColor = widget.isDark ? Colors.grey[700]! : Colors.grey[200]!;
-    final textColor = widget.isDark ? Colors.white : Colors.black87;
     final secondaryTextColor = widget.isDark
         ? Colors.grey[400]
         : Colors.grey[600];
@@ -1180,135 +1229,172 @@ class _TransferLineItemState extends State<_TransferLineItem> {
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
-      child: Card(
-        color: cardColor,
-        elevation: 0,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
-          side: BorderSide(color: borderColor, width: 1),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.all(12.0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          widget.line['product_name']?.toString() ??
-                              'Unnamed Product',
-                          style: theme.textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.w600,
-                            color: textColor,
-                          ),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ],
-                    ),
-                  ),
-                  if (!widget.isReadOnly)
-                    IconButton(
-                      icon: Icon(
-                        HugeIcons.strokeRoundedDelete02,
-                        color: Colors.red[400],
-                        size: 20,
-                      ),
-                      tooltip: 'Delete',
-                      onPressed: widget.onDelete,
-                    ),
-                ],
-              ),
-
-              const SizedBox(height: 12),
-              Row(
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Quantity',
-                          style: theme.textTheme.labelSmall?.copyWith(
-                            color: secondaryTextColor,
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        _TransferQuantityInput(
-                          initialValue: quantity,
-                          onChanged: (value) {
-                            if (value != quantity) {
-                              setState(() => quantity = value);
-                              widget.onUpdate(value, unitPrice);
-                            }
-                          },
-                          isReadOnly: widget.isReadOnly,
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: 16),
-
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Unit Price',
-                          style: theme.textTheme.labelSmall?.copyWith(
-                            color: secondaryTextColor,
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        _TransferPriceInput(
-                          initialValue: unitPrice,
-                          onChanged: (value) {
-                            if (value != unitPrice) {
-                              setState(() => unitPrice = value);
-                              widget.onUpdate(quantity, value);
-                            }
-                          },
-                          isReadOnly: widget.isReadOnly,
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: 16),
-
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.end,
+      decoration: AppTheme.cardDecoration(widget.isDark),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Total',
+                        widget.line['product_name']?.toString() ??
+                            'Unnamed Product',
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w600,
+                          color: widget.isDark
+                              ? Colors.white
+                              : theme.primaryColor,
+                        ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+                if (!widget.isReadOnly)
+                  IconButton(
+                    icon: Icon(
+                      HugeIcons.strokeRoundedDelete02,
+                      color: StatusColors.red,
+                      size: 20,
+                    ),
+                    tooltip: 'Delete',
+                    onPressed: widget.onDelete,
+                  ),
+              ],
+            ),
+
+            const SizedBox(height: 12),
+            // The two inputs share the row's full width: with the Total
+            // beside them each was ~88px, too narrow for the price once its
+            // "USD" prefix took its share.
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Quantity',
                         style: theme.textTheme.labelSmall?.copyWith(
                           color: secondaryTextColor,
                         ),
                       ),
                       const SizedBox(height: 4),
-                      Text(
-                        '\$ ${subtotal.toStringAsFixed(2)}',
-                        style: theme.textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.bold,
-                          color: widget.isDark
-                              ? Colors.white
-                              : theme.primaryColor,
-                        ),
+                      _TransferQuantityInput(
+                        initialValue: quantity,
+                        onChanged: (value) {
+                          if (value != quantity) {
+                            setState(() => quantity = value);
+                            widget.onUpdate(value, unitPrice);
+                          }
+                        },
+                        isReadOnly: widget.isReadOnly,
                       ),
                     ],
                   ),
-                ],
-              ),
-            ],
-          ),
+                ),
+                const SizedBox(width: 16),
+
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Unit Price',
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: secondaryTextColor,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      _TransferPriceInput(
+                        initialValue: unitPrice,
+                        onChanged: (value) {
+                          if (value != unitPrice) {
+                            setState(() => unitPrice = value);
+                            widget.onUpdate(quantity, value);
+                          }
+                        },
+                        isReadOnly: widget.isReadOnly,
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  'Total',
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: secondaryTextColor,
+                  ),
+                ),
+                Text(
+                  '\$ ${subtotal.toStringAsFixed(2)}',
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.bold,
+                    color: widget.isDark ? Colors.white : theme.primaryColor,
+                  ),
+                ),
+              ],
+            ),
+          ],
         ),
       ),
     );
   }
+}
+
+/// The decoration of the Quantity and Unit Price inputs. One definition, so
+/// the two are the same height with their text on the same line: the padding
+/// centres a single line in the 40px field, and the prefix (the currency)
+/// takes only its own height, so it cannot push the text off-centre.
+InputDecoration _lineInputDecoration({
+  required bool isDark,
+  required double horizontalPadding,
+  String? hintText,
+  Widget? prefix,
+}) {
+  OutlineInputBorder border([BorderSide side = BorderSide.none]) =>
+      OutlineInputBorder(
+        borderRadius: BorderRadius.circular(AppRadius.segment),
+        borderSide: side,
+      );
+
+  return InputDecoration(
+    hintText: hintText,
+    hintStyle: TextStyle(
+      fontWeight: FontWeight.w400,
+      fontStyle: FontStyle.italic,
+      color: isDark ? Colors.grey[400] : Colors.grey[600],
+    ),
+    filled: true,
+    fillColor: isDark ? Colors.grey[850] : AppTheme.inputFill,
+    isDense: true,
+    counterText: '',
+    contentPadding: EdgeInsets.symmetric(
+      vertical: 10,
+      horizontal: horizontalPadding,
+    ),
+    prefixIcon: prefix,
+    prefixIconConstraints: const BoxConstraints(minWidth: 0, minHeight: 0),
+    border: border(),
+    enabledBorder: border(),
+    focusedBorder: border(
+      const BorderSide(color: AppTheme.primaryColor, width: 2),
+    ),
+  );
 }
 
 class _TransferQuantityInput extends StatefulWidget {
@@ -1371,83 +1457,22 @@ class _TransferQuantityInputState extends State<_TransferQuantityInput> {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
 
+    // §6 quantity/numeric field — a plain numeric field, not a +/- stepper.
     return SizedBox(
       height: 40,
-      child: Container(
-        decoration: BoxDecoration(
-          color: isDark ? Colors.grey[800] : Colors.white,
-          border: Border.all(
-            color: isDark ? Colors.grey[600]! : theme.dividerColor,
-          ),
-          borderRadius: BorderRadius.circular(8),
+      child: TextField(
+        controller: _controller,
+        textAlign: TextAlign.center,
+        keyboardType: TextInputType.number,
+        readOnly: widget.isReadOnly,
+        style: theme.textTheme.bodyMedium?.copyWith(
+          fontWeight: FontWeight.w600,
+          color: isDark ? Colors.white : Colors.black,
         ),
-        child: Row(
-          children: [
-            IconButton(
-              icon: const Icon(Icons.remove, size: 18),
-              onPressed: widget.isReadOnly
-                  ? null
-                  : () {
-                      final currentValue =
-                          double.tryParse(_controller.text) ?? 1.0;
-                      if (currentValue > 1) {
-                        _controller.text = (currentValue - 1)
-                            .toInt()
-                            .toString();
-                      }
-                    },
-              padding: const EdgeInsets.all(4),
-              constraints: const BoxConstraints(),
-              style: IconButton.styleFrom(
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                shape: const RoundedRectangleBorder(
-                  borderRadius: BorderRadius.horizontal(
-                    left: Radius.circular(6),
-                  ),
-                ),
-              ),
-            ),
-            Expanded(
-              child: TextField(
-                controller: _controller,
-                textAlign: TextAlign.center,
-                keyboardType: TextInputType.number,
-                readOnly: widget.isReadOnly,
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: isDark ? Colors.white : null,
-                ),
-                decoration: const InputDecoration(
-                  border: InputBorder.none,
-                  contentPadding: EdgeInsets.symmetric(
-                    vertical: 8,
-                    horizontal: 4,
-                  ),
-                  isDense: true,
-                  counterText: '',
-                ),
-              ),
-            ),
-            IconButton(
-              icon: const Icon(Icons.add, size: 18),
-              onPressed: widget.isReadOnly
-                  ? null
-                  : () {
-                      final currentValue =
-                          double.tryParse(_controller.text) ?? 0.0;
-                      _controller.text = (currentValue + 1).toInt().toString();
-                    },
-              padding: const EdgeInsets.all(4),
-              constraints: const BoxConstraints(),
-              style: IconButton.styleFrom(
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                shape: const RoundedRectangleBorder(
-                  borderRadius: BorderRadius.horizontal(
-                    right: Radius.circular(6),
-                  ),
-                ),
-              ),
-            ),
-          ],
+        decoration: _lineInputDecoration(
+          isDark: isDark,
+          horizontalPadding: 4,
+          hintText: 'Quantity',
         ),
       ),
     );
@@ -1526,44 +1551,18 @@ class _TransferPriceInputState extends State<_TransferPriceInput> {
         keyboardType: const TextInputType.numberWithOptions(decimal: true),
         readOnly: widget.isReadOnly,
         style: theme.textTheme.bodyMedium?.copyWith(
-          color: isDark ? Colors.white : null,
+          fontWeight: FontWeight.w600,
+          color: isDark ? Colors.white : Colors.black,
         ),
-        decoration: InputDecoration(
-          prefixIcon: Padding(
-            padding: const EdgeInsets.only(
-              left: 12,
-              right: 8,
-              top: 12,
-              bottom: 12,
-            ),
+        decoration: _lineInputDecoration(
+          isDark: isDark,
+          horizontalPadding: 12,
+          prefix: Padding(
+            padding: const EdgeInsets.only(left: 12, right: 8),
             child: Text(
               'USD',
               style: TextStyle(color: isDark ? Colors.grey[400] : Colors.grey),
             ),
-          ),
-          prefixIconConstraints: const BoxConstraints(
-            minWidth: 0,
-            minHeight: 0,
-          ),
-          contentPadding: const EdgeInsets.symmetric(
-            vertical: 8,
-            horizontal: 12,
-          ),
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(8),
-            borderSide: BorderSide(
-              color: isDark ? Colors.grey[600]! : theme.dividerColor,
-            ),
-          ),
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(8),
-            borderSide: BorderSide(
-              color: isDark ? Colors.grey[600]! : theme.dividerColor,
-            ),
-          ),
-          focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(8),
-            borderSide: BorderSide(color: theme.primaryColor),
           ),
         ),
       ),

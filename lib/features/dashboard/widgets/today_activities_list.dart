@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:hugeicons/hugeicons.dart';
-import 'package:lottie/lottie.dart';
+import 'package:shimmer/shimmer.dart';
+import '../../../core/theme/app_theme.dart';
 import '../models/today_activity.dart';
+import 'dashboard_empty_card.dart';
 
 class TodayActivitiesList extends StatelessWidget {
   final List<TodayActivity> items;
@@ -28,87 +29,35 @@ class TodayActivitiesList extends StatelessWidget {
               "Today's Activities / To-Dos",
               style: TextStyle(
                 fontSize: 18,
-                fontWeight: FontWeight.w700,
-                color: isDark ? Colors.white : Colors.black87,
+                fontWeight: FontWeight.bold,
+                color: isDark ? Colors.white : AppTheme.textPrimary,
               ),
             ),
             const Spacer(),
             if (onSeeAll != null)
-              TextButton(
-                onPressed: onSeeAll,
-                child: const Text('See all'),
-              ),
+              TextButton(onPressed: onSeeAll, child: const Text('See all')),
           ],
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: 12),
         if (isLoading && items.isEmpty)
           _shimmerList(context)
         else if (items.isEmpty)
-          _emptyState(context, isDark, 'No activities today')
+          const DashboardEmptyCard(
+            icon: Icons.checklist_rounded,
+            title: 'No activities today',
+            subtitle: 'Your recent activities will appear here',
+          )
         else
-          LayoutBuilder(
-            builder: (context, constraints) {
-              final isWide = constraints.maxWidth >= 700;
-              if (isWide) {
-                return ListView.separated(
-                  physics: const NeverScrollableScrollPhysics(),
-                  shrinkWrap: true,
-                  itemCount: items.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: 8),
-                  itemBuilder: (ctx, i) => _tile(context, items[i]),
-                );
-              }
-
-              return SizedBox(
-                height: 86,
-                child: ListView.separated(
-                  scrollDirection: Axis.horizontal,
-                  itemCount: items.length,
-                  padding: EdgeInsets.zero,
-                  separatorBuilder: (_, __) => const SizedBox(width: 12),
-                  itemBuilder: (ctx, i) => SizedBox(width: 260, child: _tile(context, items[i])),
-                ),
-              );
-            },
+          // Stacked and full width, like the other sections: a row of fixed
+          // 260px tiles left a lone activity as a short card.
+          ListView.separated(
+            physics: const NeverScrollableScrollPhysics(),
+            shrinkWrap: true,
+            itemCount: items.length,
+            separatorBuilder: (_, __) => const SizedBox(height: 12),
+            itemBuilder: (ctx, i) => _tile(context, items[i]),
           ),
       ],
-    );
-  }
-
-  Widget _emptyState(BuildContext context, bool isDark , String errtext) {
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: isDark ? Colors.grey[900] : Theme.of(context).scaffoldBackgroundColor,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          SizedBox(
-            height: 120,
-            child: Lottie.network(
-              'https://assets9.lottiefiles.com/packages/lf20_t24tpvcu.json',
-              repeat: true,
-              animate: true,
-              errorBuilder: (context, error, stack) => Icon(
-                HugeIcons.strokeRoundedCalendar03,
-                size: 64,
-                color: isDark ? Colors.grey[600] : Colors.grey[400],
-              ),
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            errtext,
-
-            style: TextStyle(
-              color: isDark ? Colors.grey[300] : Colors.grey[700],
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ],
-      ),
     );
   }
 
@@ -117,29 +66,18 @@ class TodayActivitiesList extends StatelessWidget {
     final color = Theme.of(context).colorScheme.primary;
 
     return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: isDark ? Colors.grey[900] : Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: isDark ? Colors.grey[800]! : Colors.grey[200]!),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(isDark ? 0.15 : 0.05),
-            offset: const Offset(0, 2),
-            blurRadius: 6,
-          ),
-        ],
-      ),
+      padding: const EdgeInsets.all(14),
+      decoration: AppTheme.cardDecoration(isDark),
       child: Row(
         children: [
           Container(
-            width: 36,
-            height: 36,
+            width: 46,
+            height: 46,
             decoration: BoxDecoration(
-              color: color.withOpacity(0.12),
-              borderRadius: BorderRadius.circular(10),
+              color: color.withValues(alpha: 0.1),
+              shape: BoxShape.circle,
             ),
-            child: Icon(Icons.checklist_rounded, color: color, size: 18),
+            child: Icon(Icons.checklist_rounded, color: color, size: 22),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -151,9 +89,9 @@ class TodayActivitiesList extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
-                    fontSize: 14,
+                    fontSize: 15,
                     fontWeight: FontWeight.w600,
-                    color: isDark ? Colors.white : Colors.black87,
+                    color: isDark ? Colors.white : AppTheme.textPrimary,
                   ),
                 ),
                 const SizedBox(height: 2),
@@ -161,7 +99,10 @@ class TodayActivitiesList extends StatelessWidget {
                   _subtitle(a),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontSize: 12, color: isDark ? Colors.grey[400] : Colors.grey[600]),
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: isDark ? Colors.grey[400] : Colors.grey[600],
+                  ),
                 ),
               ],
             ),
@@ -169,7 +110,10 @@ class TodayActivitiesList extends StatelessWidget {
           const SizedBox(width: 8),
           Text(
             _deadline(a),
-            style: TextStyle(fontSize: 12, color: isDark ? Colors.grey[400] : Colors.grey[600]),
+            style: TextStyle(
+              fontSize: 12,
+              color: isDark ? Colors.grey[400] : Colors.grey[600],
+            ),
           ),
         ],
       ),
@@ -177,7 +121,6 @@ class TodayActivitiesList extends StatelessWidget {
   }
 
   String _subtitle(TodayActivity a) {
-
     final model = a.resModel.replaceAll('.', ' ');
     return '$model #${a.resId}';
   }
@@ -193,18 +136,23 @@ class TodayActivitiesList extends StatelessWidget {
 
   Widget _shimmerList(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    return Column(
-      children: List.generate(4, (i) => i)
-          .map((_) => Container(
-                margin: const EdgeInsets.only(bottom: 8),
-                height: 60,
+    return Shimmer.fromColors(
+      baseColor: isDark ? Colors.grey[800]! : Colors.grey[300]!,
+      highlightColor: isDark ? Colors.grey[700]! : Colors.grey[100]!,
+      child: Column(
+        children: List.generate(4, (i) => i)
+            .map(
+              (_) => Container(
+                margin: const EdgeInsets.only(bottom: 12),
+                height: 74,
                 decoration: BoxDecoration(
-                  color: isDark ? Colors.grey[900] : Colors.white,
+                  color: isDark ? Colors.grey[850] : Colors.white,
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: isDark ? Colors.grey[800]! : Colors.grey[200]!),
                 ),
-              ))
-          .toList(),
+              ),
+            )
+            .toList(),
+      ),
     );
   }
 }

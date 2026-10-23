@@ -4,6 +4,9 @@ class ReplenishmentOrderpoint {
   final String productName;
   final int? locationId;
   final String locationName;
+  final int? companyId;
+  final String warehouseName;
+  final String uomName;
   final double onHand;
   final double forecast;
   final double minQty;
@@ -19,6 +22,9 @@ class ReplenishmentOrderpoint {
     required this.productName,
     required this.locationId,
     required this.locationName,
+    this.companyId,
+    this.warehouseName = '',
+    this.uomName = '',
     required this.onHand,
     required this.forecast,
     required this.minQty,
@@ -42,12 +48,16 @@ class ReplenishmentOrderpoint {
 
     final prod = asList(json['product_id']);
     final loc = asList(json['location_id']);
+    final wh = asList(json['warehouse_id']);
+    final company = asList(json['company_id']);
+    // `uom_id` is the Odoo 20 name of stock.warehouse.orderpoint.product_uom.
+    final uom = asList(json['product_uom'] ?? json['uom_id']);
+    final uomLabel = json['product_uom_name'];
 
     DateTime? parseDate(dynamic v) {
       if (v == null || v == false) return null;
       final s = v.toString();
       try {
-
         if (s.length == 10 && s.contains('-')) {
           return DateTime.parse(s);
         }
@@ -73,6 +83,15 @@ class ReplenishmentOrderpoint {
           ? (loc[0] is int ? loc[0] as int : int.tryParse('${loc[0]}'))
           : null,
       locationName: display(loc),
+      companyId: company.isNotEmpty
+          ? (company[0] is int
+                ? company[0] as int
+                : int.tryParse('${company[0]}'))
+          : null,
+      warehouseName: display(wh),
+      uomName: uomLabel is String && uomLabel.isNotEmpty
+          ? uomLabel
+          : display(uom),
       onHand: d(json['qty_on_hand'] ?? json['qty_available']),
       forecast: d(json['qty_forecast'] ?? json['virtual_available']),
       minQty: d(json['product_min_qty']),
@@ -89,6 +108,9 @@ class ReplenishmentOrderpoint {
       'id': id,
       'product_id': productId != null ? [productId, productName] : false,
       'location_id': locationId != null ? [locationId, locationName] : false,
+      'company_id': companyId != null ? [companyId, ''] : false,
+      'warehouse_id': warehouseName.isNotEmpty ? [0, warehouseName] : false,
+      'product_uom_name': uomName,
       'qty_on_hand': onHand,
       'qty_forecast': forecast,
       'product_min_qty': minQty,

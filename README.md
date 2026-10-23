@@ -4,7 +4,7 @@
 ![Dart](https://img.shields.io/badge/Dart-0175C2?style=for-the-badge&logo=dart&logoColor=white)
 ![Android](https://img.shields.io/badge/Android-3DDC84?style=for-the-badge&logo=android&logoColor=white)
 ![iOS](https://img.shields.io/badge/iOS-000000?style=for-the-badge&logo=ios&logoColor=white)
-![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg?style=for-the-badge)
+![License](https://img.shields.io/badge/license-MIT-blue.svg?style=for-the-badge)
 
 
 Mobo Inventory is a robust mobile solution designed to seamlessly integrate with Odoo, empowering businesses to manage their warehouse operations with efficiency and precision. Built with Flutter, it offers a high-performance, intuitive interface for tracking stock, managing replenishments, and overseeing manufacturing processes directly from your mobile device.
@@ -33,14 +33,11 @@ Mobo Inventory is a robust mobile solution designed to seamlessly integrate with
 
 ###  Security & User Experience
 - **Biometric Authentication**: Secure and fast login using fingerprint or Face ID.
-- **2-Factor Authentication (2FA)**: Support for Time-based One-Time Password (TOTP) for enhanced security.
-- **User Access Control**: Permission-based access governed by Odoo's user group settings.
-- **Switch Account**: Quickly swap between multiple Odoo accounts and databases.
-- **Multi-Company Support**: Easily switch between different company profiles.
-- **Dark Mode**: Fully optimized dark theme for comfortable usage.
-- **Performance**: Optimized with pagination and domain-based filtering for large datasets.
+- **Offline Capabilities**: Continue working even without an internet connection, with data synchronizing automatically when back online.
+- **Multi-Company Support**: Easily switch between different company profiles and Odoo databases.
+- **Dark Mode**: Fully optimized dark theme for comfortable usage in low-light environments.
 
-##  Screenshots
+## � Screenshots
 
 
 
@@ -64,16 +61,11 @@ Mobo Inventory is built using modern technologies to ensure reliability and perf
 - **Authentication**: Local Auth (Biometrics) & Odoo Session Management
 - **Reporting**: PDF & Printing capabilities
 
-##  Supported Odoo Versions
-
-Tested and verified on:
-- **Odoo version 17 - 19** (Community & Enterprise)
-
 ##  Getting Started
 
 ### Prerequisites
 - Flutter SDK (Latest Stable)
-- Odoo Instance (v17 or higher recommended)
+- Odoo Instance (v14 or higher recommended)
 - Android Studio or VS Code
 
 ### Installation
@@ -100,22 +92,10 @@ Tested and verified on:
    flutter run
    ```
 
-##  Usage
+##  Configuration
 
-To get started with Mobo Inventory:
-
-1. **Open the App**: Launch Mobo Inventory on your mobile device.
-2. **Setup Server**: Enter your Odoo server URL.
-3. **Select Database**: Choose the appropriate database for your company.
-4. **Login**: Enter your Odoo credentials (including 2FA if enabled).
-5. **Start Managing**: Begin managing your inventory and warehouse operations efficiently.
-
-##  Roadmap
-
-Future improvements planned for Mobo Inventory:
-- [ ] **Offline Support**: Enable work without internet with automatic synchronization.
-- [ ] **Barcode Scanning**: Integrated barcode and QR code scanning for quick product lookup and stock moves.
-- [ ] **AI Support**: Intelligent stock predictions and optimized replenishment suggestions.
+1. **Server Connection**: Upon first launch, enter your Odoo server URL and database name.
+2. **Authentication**: Log in using your Odoo credentials. You can enable biometric login in the settings for faster access.
 
 ##  Contributing
 
@@ -126,16 +106,7 @@ We welcome contributions to improve Mobo Inventory!
 4. Push to the branch (`git push origin feature/NewFeature`).
 5. Open a Pull Request.
 
-##  Maintainers
+##  License
 
-**Team Mobo at Cybrosys Technologies**
--  [cybroplay@gmail.com](mailto:cybroplay@gmail.com)
-
-## License
-
-This project is primarily licensed under the Apache License 2.0.
-It also includes third-party components licensed under:
-- MIT License
-- GNU Lesser General Public License (LGPL)
-
-See the [LICENSE](LICENSE) file for the main license and [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) for details on included dependencies and their respective licenses.
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+# Mobo_Inventory

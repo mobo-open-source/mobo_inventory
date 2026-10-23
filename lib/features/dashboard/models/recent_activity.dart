@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:hugeicons/hugeicons.dart';
+import '../../../core/theme/app_theme.dart';
 
 /// Model representing a recent stock-related activity (picking).
 class RecentActivity {
@@ -57,19 +58,6 @@ class RecentActivity {
   }
 
   Color colorForState(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    switch (state) {
-      case 'assigned':
-        return scheme.primary;
-      case 'done':
-        return Colors.green;
-      case 'cancel':
-        return Colors.red;
-      case 'waiting':
-      case 'confirmed':
-        return Colors.orange;
-      default:
-        return Theme.of(context).textTheme.bodyMedium?.color ?? Colors.grey;
-    }
+    return StatusColors.forState(state);
   }
 }

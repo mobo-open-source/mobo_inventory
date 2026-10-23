@@ -1,3 +1,5 @@
+import '../../../core/utils/odoo_value.dart';
+
 class Picking {
   final int id;
   final String name;
@@ -40,13 +42,14 @@ class Picking {
 
     return Picking(
       id: json['id'] as int,
-      name: (json['name'] ?? '').toString(),
+      name: odooString(json['name']) ?? '',
       state: (json['state'] ?? '').toString(),
       pickingTypeCode: (json['picking_code'] ?? json['picking_type_code'] ?? '')
           .toString(),
       pickingTypeName: pickingTypeName,
-      scheduledDate: (json['scheduled_date'] ?? json['date'] ?? '').toString(),
-      origin: (json['origin'] ?? '').toString(),
+      scheduledDate:
+          odooString(json['scheduled_date']) ?? odooString(json['date']) ?? '',
+      origin: odooString(json['origin']),
       partnerName: partner,
     );
   }

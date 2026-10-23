@@ -5,11 +5,7 @@ class MoboToggle extends StatelessWidget {
   final bool value;
   final ValueChanged<bool>? onChanged;
 
-  const MoboToggle({
-    super.key,
-    required this.value,
-    this.onChanged,
-  });
+  const MoboToggle({super.key, required this.value, this.onChanged});
 
   @override
   Widget build(BuildContext context) {
@@ -29,13 +25,15 @@ class MoboToggle extends StatelessWidget {
             borderRadius: BorderRadius.circular(16),
             color: value
                 ? AppTheme.primaryColor
-                : (isDark ? Colors.transparent : AppTheme.primaryColor.withOpacity(0.06)),
+                : (isDark
+                      ? Colors.transparent
+                      : AppTheme.primaryColor.withOpacity(0.06)),
             border: Border.all(
               color: value
                   ? AppTheme.primaryColor
                   : (isDark
-                      ? Colors.grey[400]!
-                      : AppTheme.primaryColor.withOpacity(1)),
+                        ? Colors.grey[400]!
+                        : AppTheme.primaryColor.withOpacity(1)),
               width: 2,
             ),
           ),

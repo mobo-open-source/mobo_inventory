@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:hugeicons/hugeicons.dart';
 import '../../../shared/widgets/odoo_avatar.dart';
+import '../../../core/theme/app_theme.dart';
 
 class ProfileHeaderCard extends StatelessWidget {
   final String name;
@@ -39,14 +40,7 @@ class ProfileHeaderCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: theme.primaryColor,
         borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 16,
-            spreadRadius: 2,
-            offset: const Offset(0, 6),
-          ),
-        ],
+        boxShadow: AppShadows.card,
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
@@ -65,13 +59,13 @@ class ProfileHeaderCard extends StatelessWidget {
                     ),
                     child: OdooAvatar(
                       imageBase64: avatarBase64,
-                      size: 68,
-                      iconSize: 30,
+                      size: 82,
+                      iconSize: 36,
                       placeholderColor: isDark
                           ? Colors.grey[700]
                           : Colors.grey[300],
                       iconColor: isDark ? Colors.grey[500] : Colors.grey[600],
-                      borderRadius: BorderRadius.circular(34),
+                      borderRadius: BorderRadius.circular(41),
                     ),
                   ),
                 ),
@@ -81,26 +75,19 @@ class ProfileHeaderCard extends StatelessWidget {
                     right: 0,
                     child: InkWell(
                       onTap: onCameraPressed,
-                      borderRadius: BorderRadius.circular(20),
+                      borderRadius: BorderRadius.circular(18),
                       child: Container(
-                        width: 28,
-                        height: 28,
+                        width: 36,
+                        height: 36,
                         decoration: BoxDecoration(
-                          color: const Color(0xFF4CAF50),
+                          color: theme.primaryColor,
                           shape: BoxShape.circle,
-                          border: Border.all(color: Colors.white, width: 2),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withOpacity(0.15),
-                              blurRadius: 8,
-                              offset: const Offset(0, 2),
-                            ),
-                          ],
+                          border: Border.all(color: Colors.white, width: 3),
                         ),
                         child: const Icon(
                           HugeIcons.strokeRoundedCamera02,
                           color: Colors.white,
-                          size: 16,
+                          size: 18,
                         ),
                       ),
                     ),

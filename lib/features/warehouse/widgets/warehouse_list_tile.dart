@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:hugeicons/hugeicons.dart';
+import '../../../core/theme/app_theme.dart';
 import '../models/warehouse_model.dart';
 
 class WarehouseListTile extends StatelessWidget {
@@ -22,23 +23,8 @@ class WarehouseListTile extends StatelessWidget {
       borderRadius: BorderRadius.circular(12),
       child: Container(
         margin: const EdgeInsets.only(bottom: 12),
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: isDark ? Colors.grey[850] : Colors.white,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: isDark ? Colors.grey[800]! : Colors.grey[200]!,
-          ),
-          boxShadow: [
-            if (!isDark)
-              BoxShadow(
-                color: const Color(0xFF000000).withOpacity(0.06),
-                offset: const Offset(0, 6),
-                blurRadius: 16,
-                spreadRadius: 2,
-              ),
-          ],
-        ),
+        padding: const EdgeInsets.all(14),
+        decoration: AppTheme.cardDecoration(isDark),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -60,21 +46,25 @@ class WarehouseListTile extends StatelessWidget {
                 if (warehouse.code != null && warehouse.code!.isNotEmpty)
                   Container(
                     padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
+                      horizontal: 10,
                       vertical: 4,
                     ),
                     decoration: BoxDecoration(
                       color: isDark
-                          ? Colors.blue.withOpacity(0.2)
-                          : Colors.blue.withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(8),
+                          ? theme.primaryColor.withValues(alpha: 0.18)
+                          : AppTheme.primaryTint,
+                      borderRadius: BorderRadius.circular(AppRadius.md),
+                      border: Border.all(
+                        color: theme.primaryColor.withValues(alpha: 0.35),
+                        width: 1,
+                      ),
                     ),
                     child: Text(
                       warehouse.code!,
                       style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w500,
-                        color: isDark ? Colors.blue[300] : Colors.blue[700],
+                        color: isDark ? Colors.white : theme.primaryColor,
                       ),
                     ),
                   ),

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:hugeicons/hugeicons.dart';
+import '../../core/theme/app_theme.dart';
 
 /// A full-screen error widget displayed when the server is unreachable or a connection error occurs.
 class ConnectionStatusWidget extends StatelessWidget {
@@ -28,9 +29,7 @@ class ConnectionStatusWidget extends StatelessWidget {
               width: 80,
               height: 80,
               decoration: BoxDecoration(
-                color: isDark
-                    ? Colors.red[900]!.withOpacity(0.2)
-                    : Colors.red[50],
+                color: StatusColors.red.withValues(alpha: isDark ? 0.2 : 0.1),
                 shape: BoxShape.circle,
               ),
               child: Icon(
@@ -38,7 +37,7 @@ class ConnectionStatusWidget extends StatelessWidget {
                     ? HugeIcons.strokeRoundedWifiDisconnected02
                     : HugeIcons.strokeRoundedAlert02,
                 size: 40,
-                color: isDark ? Colors.red[300] : Colors.red[700],
+                color: isDark ? StatusColors.errorIcon : StatusColors.red,
               ),
             ),
             const SizedBox(height: 24),

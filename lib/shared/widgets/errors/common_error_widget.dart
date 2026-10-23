@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:lottie/lottie.dart';
+import '../../../core/theme/app_theme.dart';
 import '../empty_state.dart';
 
 class CommonErrorWidget extends StatelessWidget {
@@ -114,12 +115,19 @@ class CommonErrorWidget extends StatelessWidget {
             Container(
               padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
-                color: config.backgroundColor.withOpacity(0.1),
+                color: theme.colorScheme.surface,
                 borderRadius: BorderRadius.circular(16),
                 border: Border.all(
-                  color: config.borderColor.withOpacity(0.3),
+                  color: config.borderColor.withValues(alpha: 0.2),
                   width: 1,
                 ),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.05),
+                    blurRadius: 10,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
               ),
               child: Column(
                 children: [
@@ -136,7 +144,7 @@ class CommonErrorWidget extends StatelessWidget {
                     Container(
                       padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
-                        color: Colors.blue.withOpacity(0.1),
+                        color: StatusColors.blue.withValues(alpha: 0.1),
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: Row(
@@ -144,14 +152,14 @@ class CommonErrorWidget extends StatelessWidget {
                           Icon(
                             Icons.info_outline,
                             size: 20,
-                            color: Colors.blue.shade700,
+                            color: StatusColors.blue,
                           ),
                           const SizedBox(width: 12),
                           Expanded(
                             child: Text(
                               config.infoText,
                               style: theme.textTheme.bodySmall?.copyWith(
-                                color: Colors.blue.shade700,
+                                color: StatusColors.blue,
                                 height: 1.4,
                               ),
                             ),
@@ -180,7 +188,10 @@ class CommonErrorWidget extends StatelessWidget {
                         horizontal: 24,
                         vertical: 14,
                       ),
-                      side: BorderSide(color: config.primaryColor),
+                      side: BorderSide(
+                        color: theme.colorScheme.primary,
+                        width: 1.5,
+                      ),
                     ),
                   ),
                 if (onContactSupport != null)
@@ -216,7 +227,21 @@ class CommonErrorWidget extends StatelessWidget {
       errorBuilder: (context, error, stackTrace) {
 
         final config = _getErrorConfig();
-        return Icon(config.fallbackIcon, size: 100, color: config.primaryColor);
+        return Center(
+          child: Container(
+            width: 120,
+            height: 120,
+            decoration: BoxDecoration(
+              color: config.backgroundColor.withValues(alpha: 0.1),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              config.fallbackIcon,
+              size: 60,
+              color: config.primaryColor,
+            ),
+          ),
+        );
       },
     );
   }
@@ -241,9 +266,9 @@ class CommonErrorWidget extends StatelessWidget {
     switch (errorType) {
       case ErrorType.moduleNotInstalled:
         return _ErrorConfig(
-          primaryColor: Colors.orange.shade700,
-          backgroundColor: Colors.orange,
-          borderColor: Colors.orange,
+          primaryColor: StatusColors.orange,
+          backgroundColor: StatusColors.orange,
+          borderColor: StatusColors.orange,
           fallbackIcon: Icons.extension_off_rounded,
           showInfoBox: true,
           infoText:
@@ -251,18 +276,18 @@ class CommonErrorWidget extends StatelessWidget {
         );
       case ErrorType.network:
         return _ErrorConfig(
-          primaryColor: Colors.blue.shade700,
-          backgroundColor: Colors.blue,
-          borderColor: Colors.blue,
+          primaryColor: StatusColors.blue,
+          backgroundColor: StatusColors.blue,
+          borderColor: StatusColors.blue,
           fallbackIcon: Icons.wifi_off_rounded,
           showInfoBox: false,
           infoText: '',
         );
       case ErrorType.server:
         return _ErrorConfig(
-          primaryColor: Colors.red.shade700,
-          backgroundColor: Colors.red,
-          borderColor: Colors.red,
+          primaryColor: StatusColors.red,
+          backgroundColor: StatusColors.red,
+          borderColor: StatusColors.red,
           fallbackIcon: Icons.cloud_off_rounded,
           showInfoBox: false,
           infoText: '',
@@ -279,9 +304,9 @@ class CommonErrorWidget extends StatelessWidget {
       case ErrorType.general:
       default:
         return _ErrorConfig(
-          primaryColor: Colors.red.shade700,
-          backgroundColor: Colors.red,
-          borderColor: Colors.red,
+          primaryColor: StatusColors.red,
+          backgroundColor: StatusColors.red,
+          borderColor: StatusColors.red,
           fallbackIcon: Icons.error_outline_rounded,
           showInfoBox: false,
           infoText: '',

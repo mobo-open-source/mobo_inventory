@@ -1,10 +1,16 @@
 import 'package:flutter/material.dart';
 import 'dart:math' as math;
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import '../../../core/theme/app_theme.dart';
 import '../../../shared/widgets/toggles/mobo_checkbox.dart';
+import '../../../core/services/session_service.dart';
 import '../providers/company_provider.dart';
-import '../../../core/services/haptics_service.dart';
+import '../../../shared/widgets/snackbars/custom_snackbar.dart';
+import '../../../main.dart';
 
+/// A comprehensive company selector widget with two modes:
+/// 2. Expanded mode: Bottom sheet with multi-select for allowed companies
 class CompanySelectorWidget extends StatefulWidget {
   final bool showMultiSelect;
   final VoidCallback? onCompanyChanged;
@@ -20,26 +26,64 @@ class CompanySelectorWidget extends StatefulWidget {
 }
 
 class _CompanySelectorWidgetState extends State<CompanySelectorWidget> {
-  @override
-  void initState() {
-    super.initState();
+  // Tracks which session (userId@serverUrl) we last initialised for.
+  // Null = not yet initialised. On account switch the tuple changes, so the
+  // widget detects it and re-runs `CompanyProvider.initialize()` against the
+  // new session instead of rendering the previous account's company name.
+  String? _initialisedFor;
 
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      final provider = context.read<CompanyProvider>();
-      provider.initialize();
-    });
+  // Guards the *automatic* retry-on-error path so a persistent failure (e.g.
+  // the server staying unreachable) retries exactly once instead of looping
+  // forever: initialize() fails -> notifyListeners() -> rebuild -> error is
+  // still non-null -> without this flag we'd schedule another initialize()
+  // immediately, fail again, and repeat indefinitely (looks like it's stuck
+  // "Loading..." because it never actually stops retrying). Manual taps on
+  // the empty-state pill always go through regardless of this flag.
+  bool _hasAutoRetriedThisFailure = false;
+
+  String? _sessionKey(SessionService session) {
+    final s = session.currentSession;
+    if (s == null) return null;
+    return '${s.userId}@${s.serverUrl}#${s.database}';
   }
 
   @override
   Widget build(BuildContext context) {
-    return Consumer<CompanyProvider>(
-      builder: (context, provider, _) {
+    return Consumer2<CompanyProvider, SessionService>(
+      builder: (context, provider, session, _) {
+        final sessionKey = _sessionKey(session);
+
+        // Re-run initialize when: first mount with no data, the logged-in user
+        // changed (account switch), or the previous attempt failed (e.g. the
+        // server was unreachable) — otherwise a single failed load would leave
+        // the pill permanently stuck on "No companies" for the rest of the
+        // session. Skip while already loading, skip once companies are
+        // successfully loaded (avoid refetching on every tab switch), and
+        // only auto-retry a given failure once to avoid retry-fail-retry
+        // looping (the dashboard's own Retry action also re-triggers this
+        // provider directly, so there's still a way to recover manually).
+        final isNewSession = sessionKey != null && sessionKey != _initialisedFor;
+        if (isNewSession) {
+          _initialisedFor = sessionKey;
+          _hasAutoRetriedThisFailure = false;
+        }
+        final shouldAutoRetry = provider.companies.isEmpty &&
+            !provider.isLoading &&
+            (isNewSession ||
+                (provider.error != null && !_hasAutoRetriedThisFailure));
+        if (shouldAutoRetry) {
+          _hasAutoRetriedThisFailure = true;
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) provider.initialize();
+          });
+        }
+
         if (provider.isLoading && provider.companies.isEmpty) {
           return _buildLoadingState(context);
         }
 
         if (provider.companies.isEmpty) {
-          return _buildEmptyState(context);
+          return _buildEmptyState(context, provider);
         }
 
         return _buildCompactDropdown(context, provider);
@@ -55,8 +99,8 @@ class _CompanySelectorWidgetState extends State<CompanySelectorWidget> {
         color: isDark ? Colors.grey[900] : Colors.white,
         border: Border.all(
           color: isDark
-              ? Colors.white.withOpacity(0.08)
-              : Colors.black.withOpacity(0.06),
+              ? Colors.white.withValues(alpha: 0.08)
+              : Colors.black.withValues(alpha: 0.06),
         ),
         borderRadius: BorderRadius.circular(20),
       ),
@@ -86,7 +130,7 @@ class _CompanySelectorWidgetState extends State<CompanySelectorWidget> {
     );
   }
 
-  Widget _buildEmptyState(BuildContext context) {
+  Widget _buildEmptyState(BuildContext context, CompanyProvider provider) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
@@ -94,8 +138,8 @@ class _CompanySelectorWidgetState extends State<CompanySelectorWidget> {
         color: isDark ? Colors.grey[900] : Colors.white,
         border: Border.all(
           color: isDark
-              ? Colors.white.withOpacity(0.08)
-              : Colors.black.withOpacity(0.06),
+              ? Colors.white.withValues(alpha: 0.08)
+              : Colors.black.withValues(alpha: 0.06),
         ),
         borderRadius: BorderRadius.circular(20),
       ),
@@ -120,18 +164,16 @@ class _CompanySelectorWidgetState extends State<CompanySelectorWidget> {
     );
   }
 
+
   Widget _buildCompactDropdown(BuildContext context, CompanyProvider provider) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final textColor = isDark ? Colors.white70 : Colors.black87;
-    final rawName =
-        provider.selectedCompany?['name']?.toString() ?? 'Select Company';
+    final rawName = provider.selectedCompany?['name']?.toString() ?? 'Select Company';
     final displayName = formatCompanyName(rawName);
 
+
     return InkWell(
-      onTap: () {
-        HapticsService.selection();
-        _showDropdownMenu(context, provider);
-      },
+      onTap: () => _showDropdownMenu(context, provider),
       borderRadius: BorderRadius.circular(20),
       child: Container(
         margin: const EdgeInsets.only(right: 8),
@@ -140,8 +182,8 @@ class _CompanySelectorWidgetState extends State<CompanySelectorWidget> {
           color: isDark ? Colors.grey[900] : Colors.white,
           border: Border.all(
             color: isDark
-                ? Colors.white.withOpacity(0.08)
-                : Colors.black.withOpacity(0.06),
+                ? Colors.white.withValues(alpha: 0.08)
+                : Colors.black.withValues(alpha: 0.06),
           ),
           borderRadius: BorderRadius.circular(20),
         ),
@@ -160,10 +202,10 @@ class _CompanySelectorWidgetState extends State<CompanySelectorWidget> {
                   fontWeight: FontWeight.w600,
                 ),
                 overflow: TextOverflow.ellipsis,
+                maxLines: 1,
               ),
             ),
             const SizedBox(width: 4),
-
             if (provider.isLoading || provider.isSwitching) ...[
               SizedBox(
                 width: 14,
@@ -184,30 +226,65 @@ class _CompanySelectorWidgetState extends State<CompanySelectorWidget> {
     );
   }
 
-  void _showDropdownMenu(BuildContext context, CompanyProvider provider) async {
 
+
+  void _showDropdownMenu(BuildContext context, CompanyProvider provider) async {
+    // Always refetch on open to ensure we display up-to-date companies
+    // Fire-and-forget so the UI opens immediately but shows a spinner while loading
+    // This will set provider.isLoading = true and the compact button shows spinner
+    // The dropdown content will rebuild via Provider/Consumer if used inside
+    // broader widgets; here we keep it simple and rely on provider state
+    // management to refresh the entries.
+    // ignore: unawaited_futures
     provider.initialize();
     final screenSize = MediaQuery.of(context).size;
-
+    // Use bottom sheet on very narrow screens
     if (screenSize.width < 1000) {
+      // Same width cap as the filter sheet, so rows aren't stretched across a
+      // phone in landscape.
+      final sheetWidth = math.min(screenSize.width, 640.0);
       await showModalBottomSheet(
         context: context,
         isScrollControlled: true,
+        useRootNavigator: true,
+        useSafeArea: true,
+        constraints: BoxConstraints(maxWidth: sheetWidth),
         backgroundColor: Colors.transparent,
         builder: (context) {
           final isDark = Theme.of(context).brightness == Brightness.dark;
           return Container(
             decoration: BoxDecoration(
-              color: isDark ? Colors.grey[900] : Colors.white,
+              color: isDark ? AppTheme.darkSurface : Colors.grey[50],
               borderRadius: const BorderRadius.vertical(
-                top: Radius.circular(16),
+                top: Radius.circular(AppRadius.lg),
               ),
             ),
-            padding: const EdgeInsets.only(top: 8, bottom: 16),
-            child: _CompanyDropdownContent(
-              provider: provider,
-              onCompanyChanged: widget.onCompanyChanged,
-              width: screenSize.width,
+            padding: const EdgeInsets.only(bottom: 16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.only(top: 12, bottom: 8),
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: isDark ? Colors.grey[700] : Colors.grey[300],
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+                // Flexible: on a short screen (a phone in landscape) the list
+                // shrinks to the sheet's height and scrolls, rather than
+                // keeping its 480px cap and overflowing.
+                Flexible(
+                  child: _CompanyDropdownContent(
+                    provider: provider,
+                    onCompanyChanged: widget.onCompanyChanged,
+                    width: sheetWidth, // take full width inside sheet
+                  ),
+                ),
+              ],
             ),
           );
         },
@@ -215,6 +292,7 @@ class _CompanySelectorWidgetState extends State<CompanySelectorWidget> {
       return;
     }
 
+    // Popover for wider screens; clamp within viewport and set responsive width
     final RenderBox button = context.findRenderObject() as RenderBox;
     final RenderBox overlay =
         Navigator.of(context).overlay!.context.findRenderObject() as RenderBox;
@@ -229,7 +307,7 @@ class _CompanySelectorWidgetState extends State<CompanySelectorWidget> {
     );
     final double top = math.min(
       buttonPosition.dy + buttonSize.height + 4,
-      screenSize.height - 16 - 300,
+      screenSize.height - 16 - 300, // leave room at bottom
     );
 
     await showGeneralDialog(
@@ -239,16 +317,23 @@ class _CompanySelectorWidgetState extends State<CompanySelectorWidget> {
       barrierColor: Colors.black54,
       transitionDuration: const Duration(milliseconds: 150),
       pageBuilder: (context, animation, secondaryAnimation) {
+        final isDark = Theme.of(context).brightness == Brightness.dark;
         return Stack(
           children: [
             Positioned(
               left: left,
               top: top,
               child: Material(
-                elevation: 10,
-                borderRadius: BorderRadius.circular(12),
+                elevation: 4,
+                color: isDark ? AppTheme.darkPopupSurface : Colors.white,
+                surfaceTintColor: Colors.transparent,
+                borderRadius: BorderRadius.circular(AppRadius.lg),
+                clipBehavior: Clip.antiAlias,
                 child: ConstrainedBox(
-                  constraints: BoxConstraints(maxWidth: popoverWidth),
+                  constraints: BoxConstraints(
+                    maxWidth: popoverWidth,
+                    maxHeight: 320,
+                  ),
                   child: _CompanyDropdownContent(
                     provider: provider,
                     onCompanyChanged: widget.onCompanyChanged,
@@ -268,7 +353,6 @@ class _CompanySelectorWidgetState extends State<CompanySelectorWidget> {
       },
     );
   }
-
   String formatCompanyName(String name) {
     final match = RegExp(r'\(([^)]+)\)').firstMatch(name);
     return match != null ? match.group(1)! : name;
@@ -295,6 +379,7 @@ class _CompanyDropdownContentState extends State<_CompanyDropdownContent> {
   late int _tempSelectedCompanyId;
   late Set<int> _tempAllowedCompanyIds;
   bool _applying = false;
+  bool _resetting = false;
 
   @override
   void initState() {
@@ -303,10 +388,9 @@ class _CompanyDropdownContentState extends State<_CompanyDropdownContent> {
     _tempAllowedCompanyIds = widget.provider.selectedAllowedCompanyIds.toSet();
   }
 
-  Future<void> _onConfirm() async {
-
-    final noActiveChange =
-        _tempSelectedCompanyId == widget.provider.selectedCompanyId;
+  void _onConfirm() async {
+    // If nothing changed, just close
+    final noActiveChange = _tempSelectedCompanyId == widget.provider.selectedCompanyId;
     final noAllowedChange = _setEquals(
       _tempAllowedCompanyIds,
       widget.provider.selectedAllowedCompanyIds.toSet(),
@@ -317,37 +401,29 @@ class _CompanyDropdownContentState extends State<_CompanyDropdownContent> {
     }
 
     setState(() => _applying = true);
+    bool changed = false;
 
     try {
-      bool success = true;
-
+      // 1. Switch active company if changed
       if (!noActiveChange) {
-
-        final result = await widget.provider.switchCompany(
-          _tempSelectedCompanyId,
-        );
-        if (!result) success = false;
+        await widget.provider.switchCompany(_tempSelectedCompanyId);
+        changed = true;
       }
 
-      if (success && !noAllowedChange) {
+      if (!noAllowedChange) {
         await widget.provider.setAllowedCompanies(
           _tempAllowedCompanyIds.toList(),
         );
+        changed = true;
       }
 
-      if (success) {
-        HapticsService.success();
+      if (changed) {
         widget.onCompanyChanged?.call();
-        if (mounted) {
-          Navigator.pop(context);
-        }
-      } else {
-
-        HapticsService.error();
       }
     } finally {
       if (mounted) {
         setState(() => _applying = false);
+        Navigator.pop(context);
       }
     }
   }
@@ -362,265 +438,267 @@ class _CompanyDropdownContentState extends State<_CompanyDropdownContent> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final primaryColor = Theme.of(context).primaryColor;
 
-    return ListenableBuilder(
-      listenable: widget.provider,
-      builder: (context, child) {
-        final isLoading =
-            widget.provider.isLoading ||
-            widget.provider.isSwitching ||
-            _applying;
-
-        return Container(
-          width: widget.width ?? 280,
-          constraints: const BoxConstraints(maxHeight: 350),
-          decoration: BoxDecoration(
-            color: isDark ? const Color(0xFF2D2D2D) : Colors.white,
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-
-              if (widget.provider.error != null)
-                Container(
-                  margin: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: Colors.red.withOpacity(0.08),
-                    borderRadius: BorderRadius.circular(6),
-                    border: Border.all(color: Colors.red.withOpacity(0.25)),
-                  ),
-                  child: Row(
-                    children: [
-                      const Icon(
-                        Icons.error_outline,
-                        color: Colors.red,
-                        size: 16,
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          widget.provider.error!,
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: isDark ? Colors.white70 : Colors.black87,
-                          ),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-
-              Flexible(
-                child: ListView.builder(
-                  shrinkWrap: true,
-                  padding: const EdgeInsets.symmetric(vertical: 8),
-                  itemCount: widget.provider.companies.length,
-                  itemBuilder: (context, index) {
-                    final company = widget.provider.companies[index];
-                    final companyId = company['id'] as int;
-                    final companyName = company['name']?.toString() ?? '-';
-
-                    final isActive = companyId == _tempSelectedCompanyId;
-                    final isAllowed = _tempAllowedCompanyIds.contains(
-                      companyId,
-                    );
-
-                    return Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      child: Material(
-                        color: isActive
-                            ? (primaryColor.withOpacity(0.1))
-                            : Colors.transparent,
-                        borderRadius: BorderRadius.circular(8),
-                        child: InkWell(
-                          borderRadius: BorderRadius.circular(8),
-                          onTap: isLoading
-                              ? null
-                              : () {
-                                  HapticsService.selection();
-                                  setState(() {
-                                    _tempSelectedCompanyId = companyId;
-
-                                    _tempAllowedCompanyIds.add(companyId);
-                                  });
-                                },
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 16,
-                              vertical: 8,
-                            ),
-                            child: Row(
-                              children: [
-
-                                Expanded(
-                                  child: Text(
-                                    companyName,
-                                    style: TextStyle(
-                                      fontSize: 14,
-                                      fontWeight: isActive
-                                          ? FontWeight.w600
-                                          : FontWeight.normal,
-                                      color: isDark
-                                          ? Colors.white
-                                          : Colors.black87,
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(width: 12),
-                                SizedBox(
-                                  width: 20,
-                                  height: 20,
-                                  child: MoboCheckbox(
-                                    value: isAllowed,
-                                    onChanged: isLoading
-                                        ? null
-                                        : (companyId == _tempSelectedCompanyId)
-                                        ? null
-                                        : (val) {
-                                            setState(() {
-                                              if (val == true) {
-                                                _tempAllowedCompanyIds.add(
-                                                  companyId,
-                                                );
-                                              } else {
-                                                _tempAllowedCompanyIds.remove(
-                                                  companyId,
-                                                );
-                                              }
-                                            });
-                                          },
-                                    size: 18,
-
-                                  ),
-                                ),
-                                const SizedBox(width: 8),
-
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
-                    );
-                  },
+    // No fill of its own: the host (bottom sheet or popover) supplies the
+    // surface colour and radius.
+    return Container(
+      width: widget.width ?? 280,
+      constraints: const BoxConstraints(maxHeight: 480),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Error banner (if any)
+          if (widget.provider.error != null)
+            Container(
+              margin: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: StatusColors.red.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(
+                  color: StatusColors.red.withValues(alpha: 0.25),
                 ),
               ),
-
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 8,
-                ),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: OutlinedButton(
-                        onPressed: isLoading
-                            ? null
-                            : () {
-                                setState(() {
-                                  _tempSelectedCompanyId =
-                                      widget.provider.selectedCompanyId ?? -1;
-                                  _tempAllowedCompanyIds = widget
-                                      .provider
-                                      .selectedAllowedCompanyIds
-                                      .toSet();
-                                });
-                              },
-                        style: OutlinedButton.styleFrom(
-                          minimumSize: const Size(double.infinity, 35),
-                          padding: const EdgeInsets.symmetric(vertical: 0),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(
-                              8,
-                            ),
-                          ),
-                          side: BorderSide(color: primaryColor),
-                          foregroundColor: primaryColor,
-                        ),
-                        child: const Text(
-                          'Reset',
-                          style: TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
+              child: Row(
+                children: [
+                  const Icon(
+                    Icons.error_outline,
+                    color: StatusColors.red,
+                    size: 16,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      widget.provider.error!,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: isDark ? Colors.white70 : Colors.black87,
                       ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
                     ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: ElevatedButton(
-                        onPressed: () async {
-                          final noActiveChange =
-                              _tempSelectedCompanyId ==
-                              widget.provider.selectedCompanyId;
-                          final noAllowedChange = _setEquals(
-                            _tempAllowedCompanyIds,
-                            widget.provider.selectedAllowedCompanyIds.toSet(),
-                          );
+                  ),
+                ],
+              ),
+            ),
+          // Company list
+          Flexible(
+            child: ListView.builder(
+              shrinkWrap: true,
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              itemCount: widget.provider.companies.length,
+              itemBuilder: (context, index) {
+                final company = widget.provider.companies[index];
+                final companyId = company['id'] as int;
+                final companyName = company['name']?.toString() ?? '-';
 
-                          final disabled =
-                              isLoading || (noActiveChange && noAllowedChange);
+                final isActive = companyId == _tempSelectedCompanyId;
+                final isAllowed = _tempAllowedCompanyIds.contains(companyId);
 
-                          if (!disabled) {
-                            await _onConfirm();
-                          }
-                        },
-                        style: ElevatedButton.styleFrom(
-                          minimumSize: const Size(double.infinity, 35),
-                          backgroundColor: primaryColor,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(vertical: 0),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(
-                              8,
-                            ),
-                          ),
-                          elevation: 0,
+                return Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                  child: Material(
+                    color: isActive
+                        ? (isDark
+                              ? Colors.white.withValues(alpha: 0.1)
+                              : primaryColor.withValues(alpha: 0.1))
+                        : Colors.transparent,
+                    borderRadius: BorderRadius.circular(8),
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(8),
+                      onTap: _applying ? null : () {
+                        setState(() {
+                          _tempSelectedCompanyId = companyId;
+                          _tempAllowedCompanyIds.add(companyId);
+                        });
+                      },
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 10,
                         ),
-                        child: isLoading
-                            ? Row(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: const [
-                                  SizedBox(
-                                    width: 14,
-                                    height: 14,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                      valueColor: AlwaysStoppedAnimation<Color>(
-                                        Colors.white,
-                                      ),
-                                    ),
-                                  ),
-                                  SizedBox(width: 8),
-                                  Text(
-                                    'Applying...',
-                                    style: TextStyle(
-                                      fontSize: 13,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                ],
-                              )
-                            : const Text(
-                                'Confirm',
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                companyName,
                                 style: TextStyle(
                                   fontSize: 13,
-                                  fontWeight: FontWeight.w600,
+                                  fontWeight: isActive
+                                      ? FontWeight.w600
+                                      : FontWeight.normal,
+                                  color: isDark ? Colors.white70 : Colors.black87,
                                 ),
                               ),
+                            ),
+                            const SizedBox(width: 12),
+                            SizedBox(
+                              width: 28,
+                              height: 28,
+                              child: MoboCheckbox(
+                                value: isAllowed,
+                                onChanged: _applying
+                                    ? null
+                                    : (companyId == _tempSelectedCompanyId)
+                                    ? null
+                                    : (val) {
+                                  setState(() {
+                                    if (val == true) {
+                                      _tempAllowedCompanyIds.add(companyId);
+                                    } else {
+                                      _tempAllowedCompanyIds.remove(companyId);
+                                    }
+                                  });
+                                },
+                                size: 26,
+                                radius: AppRadius.xs,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                          ],
+                        ),
                       ),
                     ),
-                  ],
-                ),
-              ),
-            ],
+                  ),
+                );
+              },
+            ),
           ),
-        );
-      },
+          // Action Buttons
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: Row(
+              children: [
+                Expanded(
+                  child: SizedBox(
+                    height: 48,
+                    child: OutlinedButton(
+                      onPressed: (_applying || _resetting)
+                          ? null
+                          : () async {
+                              setState(() => _resetting = true);
+                              try {
+                                final prefs = await SharedPreferences.getInstance();
+                                await prefs.remove('selected_allowed_company_ids');
+                                await prefs.remove('selected_company_id');
+
+                                await widget.provider.initialize();
+                                if (mounted) {
+                                  setState(() {
+                                    _tempSelectedCompanyId =
+                                        widget.provider.selectedCompanyId ?? -1;
+                                    _tempAllowedCompanyIds = widget
+                                        .provider
+                                        .selectedAllowedCompanyIds
+                                        .toSet();
+                                  });
+                                  final ctx = navigatorKey.currentContext;
+                                  if (ctx != null && ctx.mounted) {
+                                    CustomSnackbar.showSuccess(ctx, 'Synced with server');
+                                  }
+                                }
+                              } finally {
+                                if (mounted) setState(() => _resetting = false);
+                              }
+                            },
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: primaryColor,
+                        minimumSize: const Size(double.infinity, 48),
+                        padding: EdgeInsets.zero,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(AppRadius.md),
+                        ),
+                        side: BorderSide(color: primaryColor, width: 1.5),
+                      ),
+                      child: _resetting
+                          ? SizedBox(
+                              width: 14,
+                              height: 14,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                valueColor: AlwaysStoppedAnimation<Color>(primaryColor),
+                              ),
+                            )
+                          : Text(
+                              'Reset',
+                              style: TextStyle(
+                                fontWeight: FontWeight.w500,
+                                fontSize: 16,
+                                color: primaryColor,
+                              ),
+                            ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: SizedBox(
+                    height: 48,
+                    child: ElevatedButton(
+                      onPressed: () {
+                        final noActiveChange =
+                            _tempSelectedCompanyId == widget.provider.selectedCompanyId;
+                        final noAllowedChange = _setEquals(
+                          _tempAllowedCompanyIds,
+                          widget.provider.selectedAllowedCompanyIds.toSet(),
+                        );
+                        final disabled = _applying ||
+                            _resetting ||
+                            widget.provider.isSwitching ||
+                            (noActiveChange && noAllowedChange);
+                        if (!disabled) _onConfirm();
+                      },
+                      style: ElevatedButton.styleFrom(
+                        minimumSize: const Size(double.infinity, 48),
+                        elevation: 0,
+                        backgroundColor: primaryColor,
+                        foregroundColor: Colors.white,
+                        padding: EdgeInsets.zero,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(AppRadius.md),
+                        ),
+                      ),
+                      child: _applying
+                          ? const Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                SizedBox(
+                                  width: 14,
+                                  height: 14,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    valueColor: AlwaysStoppedAnimation<Color>(
+                                      Colors.white,
+                                    ),
+                                  ),
+                                ),
+                                SizedBox(width: 8),
+                                Text(
+                                  'Applying...',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ],
+                            )
+                          : const Text(
+                              'Confirm',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 16,
+                              ),
+                            ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

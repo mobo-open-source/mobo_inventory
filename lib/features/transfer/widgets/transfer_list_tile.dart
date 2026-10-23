@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:hugeicons/hugeicons.dart';
+import '../../../core/theme/app_theme.dart';
 import '../models/transfer_model.dart';
 import '../utils/transfer_state_helper.dart';
 
@@ -24,23 +25,8 @@ class TransferListTile extends StatelessWidget {
       borderRadius: BorderRadius.circular(12),
       child: Container(
         margin: const EdgeInsets.only(bottom: 12),
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: isDark ? Colors.grey[850] : Colors.white,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: isDark ? Colors.grey[800]! : Colors.grey[200]!,
-          ),
-          boxShadow: [
-            if (!isDark)
-              BoxShadow(
-                color: const Color(0xFF000000).withOpacity(0.06),
-                offset: const Offset(0, 6),
-                blurRadius: 16,
-                spreadRadius: 2,
-              ),
-          ],
-        ),
+        padding: const EdgeInsets.all(14),
+        decoration: AppTheme.cardDecoration(isDark),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -58,25 +44,10 @@ class TransferListTile extends StatelessWidget {
                     ),
                   ),
                 ),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 4,
-                  ),
-                  decoration: BoxDecoration(
-                    color: TransferStateHelper.getStateColor(
-                      transfer.state,
-                    ).withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Text(
-                    TransferStateHelper.getStateLabel(transfer.state),
-                    style: TextStyle(
-                      color: TransferStateHelper.getStateColor(transfer.state),
-                      fontWeight: FontWeight.w700,
-                      fontSize: 12,
-                    ),
-                  ),
+                StatusColors.buildStatusBadge(
+                  TransferStateHelper.getStateLabel(transfer.state),
+                  TransferStateHelper.getStateColor(transfer.state),
+                  isDark: isDark,
                 ),
               ],
             ),
@@ -95,7 +66,7 @@ class TransferListTile extends StatelessWidget {
                     child: Text(
                       'Route: ${transfer.locationName} → ${transfer.locationDestName}',
                       style: TextStyle(
-                        fontSize: 12,
+                        fontSize: 13,
                         color: isDark ? Colors.grey[400] : Colors.grey[600],
                       ),
                       maxLines: 1,
@@ -121,7 +92,7 @@ class TransferListTile extends StatelessWidget {
                   child: Text(
                     'Date: ${transfer.scheduledDate!}',
                     style: TextStyle(
-                      fontSize: 12,
+                      fontSize: 13,
                       color: isDark ? Colors.grey[400] : Colors.grey[600],
                     ),
                   ),

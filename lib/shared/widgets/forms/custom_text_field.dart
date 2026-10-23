@@ -1,13 +1,29 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
 
-/// A standard, themed text input field used consistently across the application's forms.
+import '../mobo/mobo_text_field.dart';
+
+/// The create/edit form text field.
+///
+/// Now drawn by the Mobo design system — the shared field shell supplies the
+/// label, the 48pt box, the focus and error borders and the error message, so
+/// every form field in the app looks the same and a change to the system
+/// lands on all of them at once.
+///
+/// The constructor is unchanged so existing forms keep compiling. [isDark]
+/// and [showBorder] are accepted but ignored: the shell resolves light and
+/// dark from `Theme.of(context).brightness` itself, and its border is part of
+/// the system rather than something a call site decides. They can be dropped
+/// from the call sites whenever those files are next touched.
 class CustomTextField extends StatelessWidget {
   final TextEditingController controller;
   final String labelText;
   final String? hintText;
   final String? Function(String?)? validator;
   final bool isDark;
+
+  /// Marks the label with a red asterisk. Explicit rather than inferred from
+  /// [validator], since optional fields here carry validators too.
+  final bool isRequired;
   final bool showBorder;
   final TextInputType? keyboardType;
   final int? maxLines;
@@ -20,6 +36,7 @@ class CustomTextField extends StatelessWidget {
     this.hintText,
     this.validator,
     this.isDark = false,
+    this.isRequired = false,
     this.showBorder = false,
     this.keyboardType,
     this.maxLines = 1,
@@ -30,77 +47,16 @@ class CustomTextField extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          labelText,
-          style: TextStyle(
-            fontFamily: GoogleFonts.manrope(
-              fontWeight: FontWeight.w400,
-            ).fontFamily,
-            color: isDark ? Colors.white70 : const Color(0xff7F7F7F),
-          ),
-        ),
-        const SizedBox(height: 8),
-        TextFormField(
-          style: TextStyle(
-            fontFamily: GoogleFonts.manrope(
-              fontWeight: FontWeight.w600,
-            ).fontFamily,
-            color: isDark ? Colors.white70 : const Color(0xff000000),
-          ),
-          controller: controller,
-          onChanged: onChanged,
-          keyboardType: keyboardType ?? TextInputType.text,
-          maxLines: maxLines,
-          decoration: InputDecoration(
-            hintText: hintText,
-            hintStyle: TextStyle(
-              fontFamily: GoogleFonts.manrope(
-                fontWeight: FontWeight.w400,
-              ).fontFamily,
-              color: isDark ? Colors.white38 : Colors.grey[500],
-              fontStyle: FontStyle.italic,
-              fontSize: 14,
-            ),
-            prefixText: '',
-            suffixIcon: suffixIcon,
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide(
-                color: showBorder ? _getBorderColor() : Colors.transparent,
-                width: 2,
-              ),
-            ),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide(
-                color: showBorder
-                    ? Theme.of(context).primaryColor
-                    : Colors.transparent,
-                width: 1,
-              ),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide(
-                color: Theme.of(context).primaryColor,
-                width: 1,
-              ),
-            ),
-            filled: true,
-            fillColor: isDark
-                ? const Color(0xFF2A2A2A)
-                : const Color(0xffF8FAFB),
-          ),
-          validator: validator,
-        ),
-      ],
+    return MoboTextField(
+      controller: controller,
+      label: labelText,
+      isRequired: isRequired,
+      hintText: hintText,
+      validator: validator,
+      onChanged: onChanged,
+      keyboardType: keyboardType,
+      maxLines: maxLines,
+      suffixIcon: suffixIcon,
     );
-  }
-
-  Color _getBorderColor() {
-    return isDark ? Colors.grey[700]! : Colors.grey[400]!;
   }
 }

@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:hugeicons/hugeicons.dart';
 
+import '../../../core/theme/app_theme.dart';
+
 /// A versatile badge widget for displaying statuses (e.g., transfers, orders, invoices) with consistent styling.
 class StatusBadge extends StatelessWidget {
   final String status;
@@ -25,106 +27,87 @@ class StatusBadge extends StatelessWidget {
       case 'draft':
         return StatusBadgeStyle(
           label: 'Draft',
-          color: Colors.grey,
+          color: StatusColors.forState('draft'),
           icon: HugeIcons.strokeRoundedPencilEdit02,
         );
       case 'waiting':
         return StatusBadgeStyle(
           label: 'Waiting',
-          color: Colors.orange,
+          color: StatusColors.forState('waiting'),
           icon: Icons.hourglass_empty,
         );
       case 'confirmed':
         return StatusBadgeStyle(
           label: 'Waiting',
-          color: Colors.orange,
+          color: StatusColors.forState('waiting'),
           icon: Icons.hourglass_empty,
         );
       case 'assigned':
         return StatusBadgeStyle(
           label: 'Ready',
-          color: Colors.blue,
+          color: StatusColors.forState('assigned'),
           icon: Icons.assignment_turned_in_outlined,
         );
       case 'done':
         return StatusBadgeStyle(
           label: 'Done',
-          color: Colors.green,
+          color: StatusColors.forState('done'),
           icon: Icons.check_circle,
         );
       case 'cancel':
       case 'cancelled':
         return StatusBadgeStyle(
           label: 'Cancelled',
-          color: Colors.red,
+          color: StatusColors.forState('cancel'),
           icon: Icons.cancel_outlined,
         );
       default:
-        return StatusBadgeStyle(label: state, color: Colors.grey);
+        return StatusBadgeStyle(label: state, color: StatusColors.grey);
     }
   }
 
   static StatusBadgeStyle _getOrderStyle(String state) {
     switch (state.toLowerCase()) {
       case 'draft':
-        return StatusBadgeStyle(label: 'Draft', color: Colors.grey);
+        return StatusBadgeStyle(label: 'Draft', color: StatusColors.orange);
       case 'sent':
-        return StatusBadgeStyle(label: 'Sent', color: Colors.blue);
+        return StatusBadgeStyle(label: 'Sent', color: StatusColors.blue);
       case 'sale':
-        return StatusBadgeStyle(label: 'Sale Order', color: Colors.green);
+        return StatusBadgeStyle(label: 'Sale Order', color: StatusColors.green);
       case 'done':
-        return StatusBadgeStyle(label: 'Done', color: Colors.green);
+        return StatusBadgeStyle(label: 'Done', color: StatusColors.green);
       case 'cancel':
-        return StatusBadgeStyle(label: 'Cancelled', color: Colors.red);
+        return StatusBadgeStyle(label: 'Cancelled', color: StatusColors.red);
       default:
-        return StatusBadgeStyle(label: state, color: Colors.grey);
+        return StatusBadgeStyle(label: state, color: StatusColors.grey);
     }
   }
 
   static StatusBadgeStyle _getInvoiceStyle(String state) {
     switch (state.toLowerCase()) {
       case 'draft':
-        return StatusBadgeStyle(label: 'Draft', color: Colors.grey);
+        return StatusBadgeStyle(label: 'Draft', color: StatusColors.orange);
       case 'posted':
-        return StatusBadgeStyle(label: 'Posted', color: Colors.blue);
+        return StatusBadgeStyle(label: 'Posted', color: StatusColors.green);
       case 'paid':
-        return StatusBadgeStyle(label: 'Paid', color: Colors.green);
+        return StatusBadgeStyle(label: 'Paid', color: StatusColors.green);
       case 'cancel':
-        return StatusBadgeStyle(label: 'Cancelled', color: Colors.red);
+        return StatusBadgeStyle(label: 'Cancelled', color: StatusColors.red);
       default:
-        return StatusBadgeStyle(label: state, color: Colors.grey);
+        return StatusBadgeStyle(label: state, color: StatusColors.grey);
     }
   }
 
   @override
   Widget build(BuildContext context) {
     final badgeStyle =
-        style ?? StatusBadgeStyle(label: status, color: Colors.grey);
+        style ?? StatusBadgeStyle(label: status, color: StatusColors.grey);
 
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      decoration: BoxDecoration(
-        color: badgeStyle.color.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: badgeStyle.color.withOpacity(0.3), width: 1),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (badgeStyle.icon != null) ...[
-            Icon(badgeStyle.icon, size: 14, color: badgeStyle.color),
-            const SizedBox(width: 4),
-          ],
-          Text(
-            badgeStyle.label,
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              color: badgeStyle.color,
-            ),
-          ),
-        ],
-      ),
+    // §10 — the canonical status badge.
+    return StatusColors.buildStatusBadge(
+      badgeStyle.label,
+      badgeStyle.color,
+      isDark: Theme.of(context).brightness == Brightness.dark,
     );
   }
 }

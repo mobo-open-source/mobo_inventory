@@ -7,10 +7,9 @@ import '../models/today_activity.dart';
 import '../models/replenishment_need.dart';
 import '../../../core/exceptions/odoo_error_mapper.dart';
 import '../../../core/services/connectivity_service.dart';
-import 'package:flutter/foundation.dart';
-import '../../../core/services/odoo_session_manager.dart';
-import '../../../core/services/user_cache_service.dart';
-import '../../../core/utils/base64_utils.dart';
+
+/// The dashboard's independently loaded parts.
+enum _Section { stats, opsToday, recent, negative, today, replenishment }
 
 /// Provider for managing the dashboard state and fetching analytics data.
 class DashboardProvider extends ChangeNotifier {
@@ -20,219 +19,165 @@ class DashboardProvider extends ChangeNotifier {
     : _service = service ?? DashboardService();
 
   DashboardStats _stats = DashboardStats.empty();
-  bool _isLoading = false;
   String? _error;
   bool _hasLoadedData = false;
   List<RecentActivity> _recent = const [];
-  bool _isLoadingRecent = false;
   List<NegativeQuant> _negativeQuants = const [];
-  bool _isLoadingNegative = false;
   List<TodayActivity> _todayActivities = const [];
-  bool _isLoadingToday = false;
   int _incomingToday = 0;
   int _outgoingToday = 0;
-  bool _isLoadingOpsToday = false;
   List<ReplenishmentNeed> _replenishmentNeeds = const [];
-  bool _isLoadingReplenishment = false;
-  String? _userName;
-  Uint8List? _userAvatarBytes;
-  String? _userAvatarBase64;
-  bool _isLoadingUser = false;
+
+  /// Sections with a load in flight.
+  final Set<_Section> _loading = {};
+
+  /// Number of the latest load started per section. Every RPC runs in the
+  /// company scope of the moment it is sent, so a load that started before
+  /// the scope changed (right after sign-in, the company list settles a
+  /// moment after the dashboard's first load) answers for the old scope. A
+  /// forced reload therefore supersedes the load in flight instead of
+  /// waiting on it, and a superseded load's result is dropped.
+  final Map<_Section, int> _latestLoad = {};
 
   DashboardStats get stats => _stats;
-  bool get isLoading => _isLoading;
+  bool get isLoading => _loading.contains(_Section.stats);
   String? get error => _error;
   bool get hasLoadedData => _hasLoadedData;
   List<RecentActivity> get recentActivities => _recent;
-  bool get isLoadingRecent => _isLoadingRecent;
+  bool get isLoadingRecent => _loading.contains(_Section.recent);
   List<NegativeQuant> get negativeQuants => _negativeQuants;
-  bool get isLoadingNegative => _isLoadingNegative;
+  bool get isLoadingNegative => _loading.contains(_Section.negative);
   List<TodayActivity> get todayActivities => _todayActivities;
-  bool get isLoadingToday => _isLoadingToday;
+  bool get isLoadingToday => _loading.contains(_Section.today);
   int get incomingToday => _incomingToday;
   int get outgoingToday => _outgoingToday;
-  bool get isLoadingOpsToday => _isLoadingOpsToday;
+  bool get isLoadingOpsToday => _loading.contains(_Section.opsToday);
   List<ReplenishmentNeed> get replenishmentNeeds => _replenishmentNeeds;
-  bool get isLoadingReplenishment => _isLoadingReplenishment;
-  String? get userName => _userName;
-  Uint8List? get userAvatarBytes => _userAvatarBytes;
-  String? get userAvatarBase64 => _userAvatarBase64;
-  bool get isLoadingUser => _isLoadingUser;
+  bool get isLoadingReplenishment => _loading.contains(_Section.replenishment);
 
-  /// Fetches high-level dashboard statistics (warehouses, locations, orders, etc.).
-  Future<void> fetchStats({bool forceRefresh = false}) async {
-    if (_isLoading) return;
+  /// Loads one [section]. A call while that section is loading is ignored
+  /// unless [force]d, in which case it starts over and the running load's
+  /// result is discarded (see [_latestLoad]).
+  Future<void> _load<T>(
+    _Section section, {
+    required bool force,
+    required Future<T> Function() fetch,
+    required void Function(T value) onData,
+    required void Function(Object error) onError,
+    VoidCallback? onStart,
+  }) async {
+    if (_loading.contains(section) && !force) return;
 
-    _isLoading = true;
-    _error = null;
+    final load = (_latestLoad[section] ?? 0) + 1;
+    _latestLoad[section] = load;
+    _loading.add(section);
+    onStart?.call();
     notifyListeners();
 
     try {
-      _stats = await _service.fetchDashboardStats();
+      final value = await fetch();
+      if (_latestLoad[section] == load) onData(value);
+    } catch (e) {
+      if (_latestLoad[section] == load) onError(e);
+    } finally {
+      if (_latestLoad[section] == load) {
+        _loading.remove(section);
+        notifyListeners();
+      }
+    }
+  }
+
+  /// Fetches high-level dashboard statistics (warehouses, locations, orders, etc.).
+  Future<void> fetchStats({bool forceRefresh = false}) => _load(
+    _Section.stats,
+    force: forceRefresh,
+    onStart: () => _error = null,
+    fetch: _service.fetchDashboardStats,
+    onData: (stats) {
+      _stats = stats;
       _error = null;
       _hasLoadedData = true;
-    } catch (e) {
+    },
+    onError: (e) {
       _error = OdooErrorMapper.toUserMessage(e);
       if (e is NoInternetException || e is ServerUnreachableException) {
         _stats = DashboardStats.empty();
         _hasLoadedData = false;
       }
-    } finally {
-      _isLoading = false;
-      notifyListeners();
-    }
-  }
+    },
+  );
 
-  Future<void> fetchTodayOperationsCounts() async {
-    if (_isLoadingOpsToday) return;
-    _isLoadingOpsToday = true;
-    notifyListeners();
-    try {
-      final results = await Future.wait<int>([
-        _service.fetchIncomingTodayCount(),
-        _service.fetchOutgoingTodayCount(),
-      ]);
+  Future<void> fetchTodayOperationsCounts({bool forceRefresh = false}) => _load(
+    _Section.opsToday,
+    force: forceRefresh,
+    fetch: () => Future.wait<int>([
+      _service.fetchIncomingTodayCount(),
+      _service.fetchOutgoingTodayCount(),
+    ]),
+    onData: (results) {
       _incomingToday = results[0];
       _outgoingToday = results[1];
-    } catch (e) {
+    },
+    onError: (_) {
       _incomingToday = 0;
       _outgoingToday = 0;
-    } finally {
-      _isLoadingOpsToday = false;
-      notifyListeners();
-    }
-  }
+    },
+  );
 
-  Future<void> fetchRecentActivities({int limit = 10}) async {
-    if (_isLoadingRecent) return;
-    _isLoadingRecent = true;
-    notifyListeners();
-    try {
-      _recent = await _service.fetchRecentActivities(limit: limit);
-    } catch (e) {
-      _recent = const [];
-    } finally {
-      _isLoadingRecent = false;
-      notifyListeners();
-    }
-  }
+  Future<void> fetchRecentActivities({
+    int limit = 10,
+    bool forceRefresh = false,
+  }) => _load(
+    _Section.recent,
+    force: forceRefresh,
+    fetch: () => _service.fetchRecentActivities(limit: limit),
+    onData: (items) => _recent = items,
+    onError: (_) => _recent = const [],
+  );
 
-  Future<void> fetchNegativeQuants({int limit = 4}) async {
-    if (_isLoadingNegative) return;
-    _isLoadingNegative = true;
-    notifyListeners();
-    try {
-      _negativeQuants = await _service.fetchNegativeQuants(limit: limit);
-    } catch (e) {
-      _negativeQuants = const [];
-    } finally {
-      _isLoadingNegative = false;
-      notifyListeners();
-    }
-  }
+  Future<void> fetchNegativeQuants({
+    int limit = 4,
+    bool forceRefresh = false,
+  }) => _load(
+    _Section.negative,
+    force: forceRefresh,
+    fetch: () => _service.fetchNegativeQuants(limit: limit),
+    onData: (items) => _negativeQuants = items,
+    onError: (_) => _negativeQuants = const [],
+  );
 
-  Future<void> fetchTodayActivities({int limit = 4}) async {
-    if (_isLoadingToday) return;
-    _isLoadingToday = true;
-    notifyListeners();
-    try {
-      _todayActivities = await _service.fetchTodayActivities(limit: limit);
-    } catch (e) {
-      _todayActivities = const [];
-    } finally {
-      _isLoadingToday = false;
-      notifyListeners();
-    }
-  }
+  Future<void> fetchTodayActivities({
+    int limit = 4,
+    bool forceRefresh = false,
+  }) => _load(
+    _Section.today,
+    force: forceRefresh,
+    fetch: () => _service.fetchTodayActivities(limit: limit),
+    onData: (items) => _todayActivities = items,
+    onError: (_) => _todayActivities = const [],
+  );
 
-  Future<void> fetchReplenishmentNeeds({int limit = 4}) async {
-    if (_isLoadingReplenishment) return;
-    _isLoadingReplenishment = true;
-    notifyListeners();
-    try {
-      _replenishmentNeeds = await _service.fetchReplenishmentNeeds(
-        limit: limit,
-      );
-    } catch (e) {
-      _replenishmentNeeds = const [];
-    } finally {
-      _isLoadingReplenishment = false;
-      notifyListeners();
-    }
-  }
+  Future<void> fetchReplenishmentNeeds({
+    int limit = 4,
+    bool forceRefresh = false,
+  }) => _load(
+    _Section.replenishment,
+    force: forceRefresh,
+    fetch: () => _service.fetchReplenishmentNeeds(limit: limit),
+    onData: (items) => _replenishmentNeeds = items,
+    onError: (_) => _replenishmentNeeds = const [],
+  );
 
-  Future<void> fetchUserInfo() async {
-    if (_isLoadingUser) return;
-    _isLoadingUser = true;
-    notifyListeners();
-
-    try {
-      final cachedName = await UserCacheService.instance.getCachedUserName();
-      final cachedAvatar = await UserCacheService.instance
-          .getCachedUserAvatar();
-      if (cachedName != null) _userName = cachedName;
-      if (cachedAvatar != null) _userAvatarBytes = cachedAvatar;
-      notifyListeners();
-
-      final session = await OdooSessionManager.getCurrentSession();
-      if (session == null || session.userId == null) return;
-
-      final res = await OdooSessionManager.callKwWithCompany({
-        'model': 'res.users',
-        'method': 'read',
-        'args': [
-          [session.userId],
-          ['name', 'image_1920'],
-        ],
-        'kwargs': {},
-      });
-
-      if (res is List && res.isNotEmpty) {
-        final userData = res.first;
-        final name = userData['name']?.toString();
-        final img = userData['image_1920'];
-
-        if (name != null) _userName = name;
-
-        if (img != null && img != false) {
-          if (img is String && img.isNotEmpty && img != 'false') {
-            final bytes = await compute(decodeBase64ToBytes, img);
-            if (bytes.isNotEmpty) {
-              _userAvatarBytes = bytes;
-            }
-          }
-          if (img is String && img.isNotEmpty && img != 'false') {
-            _userAvatarBase64 = img;
-          }
-        }
-
-        if (_userName != null) {
-          await UserCacheService.instance.saveUserInfo(
-            userId: session.userId,
-            userName: _userName!,
-            avatarBase64: img is String && img.isNotEmpty && img != 'false'
-                ? img
-                : null,
-          );
-        }
-      }
-    } catch (e) {
-    } finally {
-      _isLoadingUser = false;
-      notifyListeners();
-    }
-  }
-
-  /// Refreshes all dashboard data components.
+  /// Refreshes all dashboard data components, superseding any load still
+  /// running — e.g. one started before the company scope changed.
   Future<void> refreshAll() async {
     await Future.wait([
       fetchStats(forceRefresh: true),
-      fetchTodayOperationsCounts(),
-      fetchRecentActivities(limit: 4),
-      fetchNegativeQuants(limit: 4),
-      fetchTodayActivities(limit: 4),
-      fetchReplenishmentNeeds(limit: 4),
-      fetchUserInfo(),
+      fetchTodayOperationsCounts(forceRefresh: true),
+      fetchRecentActivities(limit: 4, forceRefresh: true),
+      fetchNegativeQuants(limit: 4, forceRefresh: true),
+      fetchTodayActivities(limit: 4, forceRefresh: true),
+      fetchReplenishmentNeeds(limit: 4, forceRefresh: true),
     ]);
   }
 
@@ -242,25 +187,20 @@ class DashboardProvider extends ChangeNotifier {
   }
 
   void resetState() {
+    // Loads still running were started for the outgoing account.
+    for (final section in _Section.values) {
+      _latestLoad[section] = (_latestLoad[section] ?? 0) + 1;
+    }
+    _loading.clear();
     _stats = DashboardStats.empty();
-    _isLoading = false;
     _error = null;
     _hasLoadedData = false;
     _recent = const [];
-    _isLoadingRecent = false;
     _negativeQuants = const [];
-    _isLoadingNegative = false;
     _todayActivities = const [];
-    _isLoadingToday = false;
     _incomingToday = 0;
     _outgoingToday = 0;
-    _isLoadingOpsToday = false;
     _replenishmentNeeds = const [];
-    _isLoadingReplenishment = false;
-    _userName = null;
-    _userAvatarBytes = null;
-    _userAvatarBase64 = null;
-    _isLoadingUser = false;
     notifyListeners();
   }
 }

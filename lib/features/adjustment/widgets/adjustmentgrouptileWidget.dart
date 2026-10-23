@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:hugeicons/hugeicons.dart';
+import '../../../core/theme/app_theme.dart';
 import 'adjustmentListTileWidget.dart';
 
 /// A widget that groups multiple [AdjustmentListTile] items under a collectible header.
@@ -47,43 +48,40 @@ class _AdjustmentGroupTileState extends State<AdjustmentGroupTile> {
   Widget build(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
+        // grey[900] in dark so the grey[850] cards nested in the group stay
+        // visible.
         color: widget.isDark ? Colors.grey[900] : Colors.white,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(AppRadius.lg),
         border: Border.all(
           color: widget.isDark
-              ? Colors.white.withOpacity(0.08)
-              : Colors.black.withOpacity(0.06),
+              ? Colors.white.withValues(alpha: 0.08)
+              : Colors.black.withValues(alpha: 0.06),
         ),
-        boxShadow: [
-          if (!widget.isDark)
-            BoxShadow(
-              blurRadius: 16,
-              spreadRadius: 2,
-              offset: const Offset(0, 6),
-              color: Colors.black.withOpacity(0.08),
-            ),
-        ],
+        boxShadow: AppShadows.card,
       ),
-      margin: const EdgeInsets.only(bottom: 12),
+      margin: const EdgeInsets.only(bottom: 8),
       child: Column(
         children: [
           InkWell(
             onTap: () => setState(() => _expanded = !_expanded),
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(AppRadius.md),
+            splashColor: Colors.transparent,
+            highlightColor: Colors.transparent,
             child: Padding(
               padding: const EdgeInsets.all(16),
               child: Row(
                 children: [
                   Container(
-                    padding: const EdgeInsets.all(10),
+                    width: 46,
+                    height: 46,
                     decoration: BoxDecoration(
-                      color: widget.theme.primaryColor.withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(8),
+                      color: widget.theme.primaryColor.withValues(alpha: 0.1),
+                      shape: BoxShape.circle,
                     ),
                     child: Icon(
                       _iconForGroup(),
                       color: widget.theme.primaryColor,
-                      size: 20,
+                      size: 22,
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -94,18 +92,18 @@ class _AdjustmentGroupTileState extends State<AdjustmentGroupTile> {
                         Text(
                           widget.groupKey,
                           style: TextStyle(
-                            fontSize: 15,
+                            fontSize: 14,
                             fontWeight: FontWeight.w600,
                             color: widget.isDark
                                 ? Colors.white
-                                : Colors.black87,
+                                : Colors.black,
                           ),
                         ),
                         const SizedBox(height: 4),
                         Text(
                           '${widget.adjustments.length} adjustment${widget.adjustments.length == 1 ? '' : 's'}',
                           style: TextStyle(
-                            fontSize: 13,
+                            fontSize: 14,
                             color: widget.isDark
                                 ? Colors.grey[400]
                                 : Colors.grey[600],
@@ -116,7 +114,7 @@ class _AdjustmentGroupTileState extends State<AdjustmentGroupTile> {
                   ),
                   Icon(
                     _expanded ? Icons.expand_less : Icons.expand_more,
-                    color: widget.isDark ? Colors.grey[400] : Colors.grey[600],
+                    color: widget.isDark ? Colors.white70 : Colors.black87,
                   ),
                 ],
               ),

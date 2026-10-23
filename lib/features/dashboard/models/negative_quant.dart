@@ -1,3 +1,5 @@
+import '../../../core/utils/odoo_value.dart';
+
 /// Model representing a product with negative quantity in a specific location.
 class NegativeQuant {
   final int id;
@@ -17,7 +19,7 @@ class NegativeQuant {
     final loc = data['location_id'];
     String nameFromRel(dynamic rel) {
       if (rel is List && rel.length >= 2) return rel[1].toString();
-      return (rel ?? '').toString();
+      return odooString(rel) ?? '';
     }
 
     return NegativeQuant(

@@ -14,16 +14,14 @@ PageRoute<T> slidingPageTransitionRL<T>(BuildContext context, Widget page) {
         end: Offset.zero,
       ).chain(CurveTween(curve: curve)).animate(animation);
 
-      final fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
-        CurvedAnimation(parent: animation, curve: Curves.easeOut),
-      );
+      final fadeAnimation = Tween<double>(
+        begin: 0.0,
+        end: 1.0,
+      ).animate(CurvedAnimation(parent: animation, curve: Curves.easeOut));
 
       return SlideTransition(
         position: offsetAnimation,
-        child: FadeTransition(
-          opacity: fadeAnimation,
-          child: child,
-        ),
+        child: FadeTransition(opacity: fadeAnimation, child: child),
       );
     },
   );
@@ -41,27 +39,31 @@ PageRoute<T> slidingPageTransitionLR<T>(BuildContext context, Widget page) {
         end: Offset.zero,
       ).chain(CurveTween(curve: curve)).animate(animation);
 
-      final fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
-        CurvedAnimation(parent: animation, curve: Curves.easeOut),
-      );
+      final fadeAnimation = Tween<double>(
+        begin: 0.0,
+        end: 1.0,
+      ).animate(CurvedAnimation(parent: animation, curve: Curves.easeOut));
 
       return SlideTransition(
         position: offsetAnimation,
-        child: FadeTransition(
-          opacity: fadeAnimation,
-          child: child,
-        ),
+        child: FadeTransition(opacity: fadeAnimation, child: child),
       );
     },
   );
 }
 
-PageRoute<T> dynamicRoute<T>(BuildContext context, Widget page, {bool fromLeft = false}) {
+PageRoute<T> dynamicRoute<T>(
+  BuildContext context,
+  Widget page, {
+  bool fromLeft = false,
+}) {
   if (defaultTargetPlatform == TargetPlatform.iOS) {
     return CupertinoPageRoute<T>(
       builder: (context) => page,
       fullscreenDialog: false,
     );
   }
-  return fromLeft ? slidingPageTransitionLR<T>(context, page) : slidingPageTransitionRL<T>(context, page);
+  return fromLeft
+      ? slidingPageTransitionLR<T>(context, page)
+      : slidingPageTransitionRL<T>(context, page);
 }

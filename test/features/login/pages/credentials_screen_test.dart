@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:hugeicons/hugeicons.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -93,7 +94,7 @@ void main() {
     await tester.pumpWidget(createWidgetUnderTest());
     await tester.pumpAndSettle();
 
-    final visibilityIcon = find.byIcon(Icons.visibility_off_outlined);
+    final visibilityIcon = find.byIcon(HugeIcons.strokeRoundedViewOff);
     expect(visibilityIcon, findsOneWidget);
 
     await tester.tap(visibilityIcon);

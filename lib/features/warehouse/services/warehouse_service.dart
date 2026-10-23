@@ -41,6 +41,34 @@ class WarehouseService {
           }
   }
 
+  /// The one domain both [fetchWarehouses] and [getWarehouseCount] use, so
+  /// the list's total always matches the rows it pages through. Company
+  /// scoping is left to the allowed-companies context `callKwWithCompany`
+  /// sends (Odoo's record rule), exactly as Odoo and the dashboard count.
+  List<dynamic> _buildDomain({
+    String? searchQuery,
+    bool? hasStockLocation,
+    bool? hasCode,
+  }) {
+    final List<dynamic> domain = [];
+
+    if (searchQuery != null && searchQuery.isNotEmpty) {
+      domain.add('|');
+      domain.add(['name', 'ilike', searchQuery]);
+      domain.add(['code', 'ilike', searchQuery]);
+    }
+
+    if (hasStockLocation == true) {
+      domain.add(['lot_stock_id', '!=', false]);
+    }
+
+    if (hasCode == true) {
+      domain.add(['code', '!=', '']);
+    }
+
+    return domain;
+  }
+
   Future<List<Warehouse>> fetchWarehouses({
     String? searchQuery,
     int limit = 20,
@@ -49,27 +77,11 @@ class WarehouseService {
     bool? hasCode,
   }) async {
     try {
-      final client = await OdooSessionManager.getClientEnsured();
-
-      final List<dynamic> domain = [];
-
-      if (searchQuery != null && searchQuery.isNotEmpty) {
-        domain.add('|');
-        domain.add(['name', 'ilike', searchQuery]);
-        domain.add(['code', 'ilike', searchQuery]);
-      }
-
-      if (hasStockLocation == true) {
-        domain.add(['lot_stock_id', '!=', false]);
-      }
-
-      if (hasCode == true) {
-        domain.add(['code', '!=', '']);
-      }
-
-      try {
-
-      } catch (_) {}
+      final domain = _buildDomain(
+        searchQuery: searchQuery,
+        hasStockLocation: hasStockLocation,
+        hasCode: hasCode,
+      );
 
       final result = await OdooSessionManager.callKwWithCompany({
         'model': 'stock.warehouse',
@@ -92,24 +104,11 @@ class WarehouseService {
 
   Future<int> getWarehouseCount({String? searchQuery, bool? hasStockLocation, bool? hasCode}) async {
     try {
-      final client = await OdooSessionManager.getClientEnsured();
-
-      final List<dynamic> domain = [];
-
-      if (searchQuery != null && searchQuery.isNotEmpty) {
-        domain.add('|');
-        domain.add(['name', 'ilike', searchQuery]);
-        domain.add(['code', 'ilike', searchQuery]);
-      }
-
-      try {
-        final currentCompanyId = await OdooSessionManager.getSelectedCompanyId();
-        if (currentCompanyId != null) {
-          domain.add('|');
-          domain.add(['company_id', '=', false]);
-          domain.add(['company_id', '=', currentCompanyId]);
-        }
-      } catch (_) {}
+      final domain = _buildDomain(
+        searchQuery: searchQuery,
+        hasStockLocation: hasStockLocation,
+        hasCode: hasCode,
+      );
 
       final result = await OdooSessionManager.callKwWithCompany({
         'model': 'stock.warehouse',

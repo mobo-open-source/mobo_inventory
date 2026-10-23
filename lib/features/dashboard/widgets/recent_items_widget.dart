@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'package:hugeicons/hugeicons.dart';
 import 'package:shimmer/shimmer.dart';
 import '../providers/last_opened_provider.dart';
+import '../../../core/theme/app_theme.dart';
 
 class RecentItemsWidget extends StatelessWidget {
   final List<LastOpenedItem> recentItems;
@@ -23,16 +23,12 @@ class RecentItemsWidget extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 4.0),
-          child: Text(
-            'Continue Working On',
-            style: TextStyle(
-              fontSize: 18,
-              fontFamily: GoogleFonts.inter().fontFamily,
-              fontWeight: FontWeight.bold,
-              color: isDark ? Colors.white : Colors.black87,
-            ),
+        Text(
+          'Continue Working On',
+          style: TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.bold,
+            color: isDark ? Colors.white : AppTheme.textPrimary,
           ),
         ),
         const SizedBox(height: 12),
@@ -53,19 +49,8 @@ class RecentItemsWidget extends StatelessWidget {
         (index) => Container(
           constraints: const BoxConstraints(minHeight: 80),
           margin: const EdgeInsets.only(bottom: 12),
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
-          decoration: BoxDecoration(
-            color: isDark ? Colors.grey[850] : Colors.white,
-            borderRadius: BorderRadius.circular(12),
-            boxShadow: [
-              BoxShadow(
-                color: isDark ? Colors.black26 : Colors.black.withOpacity(0.05),
-                blurRadius: 16,
-                spreadRadius: 2,
-                offset: const Offset(0, 6),
-              ),
-            ],
-          ),
+          padding: const EdgeInsets.all(14),
+          decoration: AppTheme.cardDecoration(isDark),
           child: _buildRecentItemShimmer(),
         ),
       ),
@@ -122,21 +107,7 @@ class RecentItemsWidget extends StatelessWidget {
   Widget _buildEmptyState() {
     return Container(
       padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: isDark ? Colors.grey[850] : Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: isDark ? Colors.grey[800]! : Colors.grey[200]!,
-          width: 1,
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: isDark ? Colors.black26 : Colors.grey.withOpacity(0.1),
-            blurRadius: 4,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
+      decoration: AppTheme.cardDecoration(isDark),
       child: Center(
         child: Column(
           children: [
@@ -177,30 +148,14 @@ class RecentItemsWidget extends StatelessWidget {
             (item) => Container(
               constraints: const BoxConstraints(minHeight: 80),
               margin: const EdgeInsets.only(bottom: 12),
-              decoration: BoxDecoration(
-                color: isDark ? Colors.grey[850] : Colors.white,
-                borderRadius: BorderRadius.circular(12),
-                boxShadow: [
-                  BoxShadow(
-                    color: isDark
-                        ? Colors.black26
-                        : Colors.black.withOpacity(0.05),
-                    blurRadius: 16,
-                    spreadRadius: 2,
-                    offset: const Offset(0, 6),
-                  ),
-                ],
-              ),
+              decoration: AppTheme.cardDecoration(isDark),
               child: Material(
                 color: Colors.transparent,
                 child: InkWell(
                   borderRadius: BorderRadius.circular(12),
                   onTap: () => onItemTap(item),
                   child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 24,
-                    ),
+                    padding: const EdgeInsets.all(14),
                     child: _buildRecentItem(item),
                   ),
                 ),
@@ -215,18 +170,16 @@ class RecentItemsWidget extends StatelessWidget {
     return Row(
       children: [
         Container(
-          width: 40,
-          height: 40,
+          width: 46,
+          height: 46,
           decoration: BoxDecoration(
-            color: isDark
-                ? _getTypeColor(item.type).withOpacity(0.2)
-                : _getTypeColor(item.type).withOpacity(0.1),
-            borderRadius: BorderRadius.circular(12),
+            color: _getTypeColor(item.type).withValues(alpha: 0.1),
+            shape: BoxShape.circle,
           ),
           child: Icon(
             LastOpenedItem.iconFromKey(item.iconKey),
-            color: isDark ? Colors.white : _getTypeColor(item.type),
-            size: 20,
+            color: _getTypeColor(item.type),
+            size: 22,
           ),
         ),
         const SizedBox(width: 12),
@@ -239,9 +192,9 @@ class RecentItemsWidget extends StatelessWidget {
               Text(
                 item.title,
                 style: TextStyle(
-                  fontSize: 14,
+                  fontSize: 15,
                   fontWeight: FontWeight.bold,
-                  color: isDark ? Colors.white : Colors.black87,
+                  color: isDark ? Colors.white : AppTheme.textPrimary,
                 ),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
@@ -251,7 +204,7 @@ class RecentItemsWidget extends StatelessWidget {
                 Text(
                   item.subtitle,
                   style: TextStyle(
-                    fontSize: 12,
+                    fontSize: 13,
                     color: isDark ? Colors.grey[400] : Colors.grey[600],
                   ),
                   maxLines: 1,
@@ -261,7 +214,6 @@ class RecentItemsWidget extends StatelessWidget {
             ],
           ),
         ),
-
       ],
     );
   }
@@ -269,13 +221,13 @@ class RecentItemsWidget extends StatelessWidget {
   Color _getTypeColor(String type) {
     switch (type.toLowerCase()) {
       case 'product':
-        return const Color(0xFF9C27B0);
+        return AppTheme.primaryColor;
       case 'transfer':
-        return const Color(0xFF2196F3);
+        return StatusColors.blue;
       case 'replenishment':
-        return const Color(0xFFFF9800);
+        return StatusColors.orange;
       default:
-        return Colors.grey;
+        return StatusColors.grey;
     }
   }
 }

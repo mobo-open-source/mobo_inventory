@@ -6,27 +6,38 @@ import 'package:flutter/services.dart';
 import 'package:hugeicons/hugeicons.dart';
 import '../../../shared/widgets/loaders/loading_widget.dart';
 import '../../../shared/widgets/loaders/list_shimmer.dart';
+import '../../../core/services/error_manager.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:provider/provider.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 import '../providers/inventory_product_provider.dart';
 import '../../../core/services/runtime_permission_service.dart';
 import '../../../shared/widgets/pagination/pagination_controls.dart';
+import '../../../shared/widgets/kanban/mobo_kanban_board.dart';
+import '../../../shared/widgets/toggles/view_mode_toggle.dart';
+import '../../../shared/widgets/filters/group_by_pill.dart';
+import '../../../shared/widgets/filters/active_filters_badge.dart';
 import '../widgets/inventory_product_list_tile.dart';
-import '../widgets/filter_bottom_sheet.dart';
+import '../../../shared/widgets/search/mobo_search_filter_bar.dart';
+import '../../../shared/widgets/filters/premium_filter_bottom_sheet.dart';
 import '../../../shared/widgets/snackbars/custom_snackbar.dart';
 import '../../adjustment/providers/adjustment_provider.dart';
 import '../../adjustment/widgets/adjustmentDialogWidget.dart';
 import '../../adjustment/models/inventory_adjustment_model.dart';
 import '../../adjustment/services/adjustment_service.dart';
-import '../../../shared/widgets/forms/custom_dropdown.dart';
-import '../../../shared/widgets/forms/custom_text_field.dart';
-import '../../../shared/widgets/dialogs/common_dialog.dart';
+import '../../../shared/widgets/layout/collapsible_header_layout.dart';
+import '../models/inventory_product.dart';
+import '../widgets/adjustment_picker_sheet.dart';
+import '../widgets/create_adjustment_dialog.dart';
+import '../widgets/inventory_product_kanban_card.dart';
+import '../utils/inventory_access.dart';
 import 'package:go_router/go_router.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../../core/routing/app_routes.dart';
 import '../../../core/utils/debouncer.dart';
 import '../../../core/services/haptics_service.dart';
 import '../../../shared/widgets/empty_state.dart';
+import '../../../core/theme/app_theme.dart';
 
 /// Screen displaying a searchable and filterable list of inventory products.
 class InventoryProductsListScreen extends StatefulWidget {
@@ -40,7 +51,9 @@ class InventoryProductsListScreen extends StatefulWidget {
 class _InventoryProductsListScreenState
     extends State<InventoryProductsListScreen> {
   final TextEditingController _searchController = TextEditingController();
-  final ScrollController _scrollController = ScrollController();
+  // No ScrollController on the product lists: on a short (landscape) screen
+  // the header scrolls away with the list through NestedScrollView, which
+  // only works if the list picks up its PrimaryScrollController.
   final Debouncer _searchDebouncer = Debouncer(milliseconds: 500);
 
   final stt.SpeechToText _speech = stt.SpeechToText();
@@ -53,15 +66,32 @@ class _InventoryProductsListScreenState
 
   bool _isScanning = false;
 
-  final Map<int, Uint8List> _imageCache = {};
+  /// Decoded `image_128` per product id, with the base64 it came from so an
+  /// image changed in the product form is decoded afresh.
+  final Map<int, ({String source, Uint8List bytes})> _imageCache = {};
 
   final Map<String, bool> _expandedGroups = {};
   bool _allGroupsExpanded = false;
+
+  /// Groups whose "Load more" is fetching.
+  final Set<String> _loadingMoreGroups = {};
+
+  static const String _viewModePrefKey = 'inventory_products_view_mode';
+
+  /// Kanban (grid of cards) rather than list view.
+  bool _isKanban = false;
+
+  /// Clearance below the last item so the create button never covers it.
+  static const double _fabClearance = 96;
+
+  /// The user's access rights, read at the top of each build.
+  late InventoryAccess _access;
 
   @override
   void initState() {
     super.initState();
     _searchController.addListener(_onSearchChanged);
+    _restoreViewMode();
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final provider = context.read<InventoryProductProvider>();
@@ -79,22 +109,101 @@ class _InventoryProductsListScreenState
     }
   }
 
+  Future<void> _restoreViewMode() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final isKanban = prefs.getString(_viewModePrefKey) == 'kanban';
+      if (mounted && isKanban != _isKanban) {
+        setState(() => _isKanban = isKanban);
+      }
+    } catch (_) {
+      // No stored preference: stay on the list view.
+    }
+  }
+
+  Future<void> _setViewMode(bool isKanban) async {
+    if (isKanban == _isKanban) return;
+    HapticsService.light();
+    setState(() => _isKanban = isKanban);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_viewModePrefKey, isKanban ? 'kanban' : 'list');
+    } catch (_) {}
+  }
+
   @override
   void dispose() {
     _searchDebouncer.dispose();
     _listeningTimeoutTimer?.cancel();
     _searchController.dispose();
-    _scrollController.dispose();
     super.dispose();
+  }
+
+  Future<void> _openProductDetail(int productId) async {
+    final updated = await context.pushNamed<bool>(
+      AppRoutes.inventoryProductDetail,
+      extra: {'productId': productId},
+    );
+    if (updated == true && mounted) await _reloadAfterChange();
+  }
+
+  void _openViewStock(InventoryProduct product) {
+    context.pushNamed(
+      AppRoutes.viewStock,
+      extra: {'productId': product.id, 'productName': product.displayname},
+    );
+  }
+
+  Future<void> _openCreateProduct() async {
+    final created = await context.pushNamed<bool>(
+      AppRoutes.inventoryProductEdit,
+      extra: {'create': true},
+    );
+    if (created != true || !mounted) return;
+    CustomSnackbar.showSuccess(context, 'Product created successfully');
+    await _reloadAfterChange();
+  }
+
+  /// Reloads the list (and the group counts, when grouped) keeping the
+  /// current search and filters.
+  Future<void> _reloadAfterChange() async {
+    final provider = context.read<InventoryProductProvider>();
+    await provider.fetchProducts(forceRefresh: true);
+    if (provider.selectedGroupBy != null) await provider.fetchGroupSummary();
   }
 
   void _onSearchChanged() {
     _searchDebouncer.run(() {
-      if (!mounted) return;
-      final provider = context.read<InventoryProductProvider>();
-      provider.fetchProducts(searchQuery: _searchController.text.trim());
-      HapticsService.light();
+      if (mounted) _search();
     });
+  }
+
+  /// Searches for what the field holds, under the filters already applied.
+  /// Typing, the clear button, voice and the barcode scan all end up here.
+  void _search() {
+    final provider = context.read<InventoryProductProvider>();
+    final query = _searchController.text.trim();
+    // The field also notifies on a cursor move or a focus change; only a
+    // different text is a new search (and a reload of the list).
+    if (query == provider.searchQuery) return;
+
+    // Forced, so a search typed while another is still loading is not
+    // dropped — which left the list on the old search with the field cleared.
+    provider.fetchProducts(searchQuery: query, forceRefresh: true);
+    // A grouped list shows its groups, not `products`: their counts and
+    // records are searched too, or clearing the search would leave them on
+    // the old result.
+    if (provider.selectedGroupBy != null) provider.fetchGroupSummary();
+    HapticsService.light();
+  }
+
+  /// Clears the search, every filter and the grouping, and reloads.
+  void _clearAllFilters() {
+    final provider = context.read<InventoryProductProvider>();
+    _searchController.clear();
+    _searchDebouncer.cancel();
+    provider.clearFilters();
+    provider.fetchProducts(searchQuery: '', forceRefresh: true);
   }
 
   Future<void> _onRefresh() async {
@@ -104,7 +213,6 @@ class _InventoryProductsListScreenState
 
   Future<void> _openAdjustmentForProduct(dynamic product) async {
     final theme = Theme.of(context);
-    final isDark = Theme.of(context).brightness == Brightness.dark;
 
     showDialog(
       context: context,
@@ -129,6 +237,7 @@ class _InventoryProductsListScreenState
       final svc = AdjustmentService();
 
       final locations = await svc.fetchLocations();
+      if (!mounted) return;
       if (locations.isEmpty) {
         if (mounted) {
           CustomSnackbar.showError(context, 'No internal locations available');
@@ -136,86 +245,28 @@ class _InventoryProductsListScreenState
         return;
       }
 
-      int selectedLocationId = locations.first['id'] as int;
-      double countedQty = 0;
-      final isDarkLocal = isDark;
-      final qtyController = TextEditingController(text: '');
-
-      final confirmed = await showDialog<bool>(
-        context: context,
-        barrierDismissible: false,
-        builder: (ctx) {
-          return CommonDialog(
-            title: 'Create Inventory Adjustment',
-            primaryLabel: 'Create & Apply',
-            onPrimary: () => Navigator.of(ctx).pop(true),
-            secondaryLabel: 'Cancel',
-            onSecondary: () => Navigator.of(ctx).pop(false),
-            body: StatefulBuilder(
-              builder: (ctx, setState) {
-                return ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 420),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      CustomDropdown<int>(
-                        value: selectedLocationId,
-                        labelText: 'Location',
-                        hintText: 'Select location',
-                        isDark: isDarkLocal,
-                        items: [
-                          for (final l in locations)
-                            DropdownMenuItem<int>(
-                              value: l['id'] as int,
-                              child: Text(
-                                l['complete_name']?.toString() ??
-                                    l['name']?.toString() ??
-                                    'Location',
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                        ],
-                        onChanged: (v) => setState(
-                          () => selectedLocationId = v ?? selectedLocationId,
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      CustomTextField(
-                        controller: qtyController,
-                        labelText: 'Counted Quantity',
-                        hintText: 'Enter counted quantity',
-                        isDark: isDarkLocal,
-                        keyboardType: const TextInputType.numberWithOptions(
-                          decimal: true,
-                        ),
-                        onChanged: (val) {
-                          final parsed = double.tryParse(val.trim());
-                          countedQty = parsed ?? 0;
-                        },
-                      ),
-                    ],
-                  ),
-                );
-              },
-            ),
-          );
-        },
+      final adjustment = await CreateAdjustmentDialog.show(
+        context,
+        locations: locations,
       );
-
-      if (confirmed == true) {
+      if (adjustment != null) {
+        final countedQty = adjustment.countedQuantity;
         try {
           final createdId = await svc.createInventoryLine(
             productId: product.id,
-            locationId: selectedLocationId,
+            locationId: adjustment.locationId,
             countedQuantity: countedQty,
           );
           if (createdId != null) {
-            await svc.applyAdjustment(createdId);
+            // Without the right to apply, the count is recorded for a stock
+            // manager to apply.
+            if (adjustment.apply) await svc.applyAdjustment(createdId);
             if (mounted) {
               CustomSnackbar.showSuccess(
                 context,
-                'Inventory applied: qty $countedQty at selected location',
+                adjustment.apply
+                    ? 'Inventory applied: qty $countedQty at selected location'
+                    : 'Count of $countedQty saved; a stock manager needs to apply it',
               );
               HapticsService.success();
             }
@@ -253,69 +304,9 @@ class _InventoryProductsListScreenState
     if (adjProvider.adjustments.length == 1) {
       await openDialog(adjProvider.adjustments.first);
     } else {
-      final selected = await showModalBottomSheet<InventoryAdjustment>(
-        context: context,
-        backgroundColor: Colors.transparent,
-        builder: (ctx) {
-          return Container(
-            height: MediaQuery.of(ctx).size.height * 0.6,
-            decoration: BoxDecoration(
-              color: isDark ? const Color(0xFF232323) : Colors.white,
-              borderRadius: const BorderRadius.vertical(
-                top: Radius.circular(16),
-              ),
-            ),
-            child: Column(
-              children: [
-                Padding(
-                  padding: const EdgeInsets.all(16.0),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          'Select Location / Lot',
-                          style: TextStyle(
-                            fontWeight: FontWeight.w600,
-                            fontSize: 16,
-                            color: isDark ? Colors.white : Colors.black87,
-                          ),
-                        ),
-                      ),
-                      IconButton(
-                        onPressed: () => Navigator.pop(ctx),
-                        icon: const Icon(Icons.close),
-                      ),
-                    ],
-                  ),
-                ),
-                Expanded(
-                  child: ListView.separated(
-                    itemCount: adjProvider.adjustments.length,
-                    separatorBuilder: (_, __) => Divider(
-                      height: 1,
-                      color: isDark ? Colors.white10 : Colors.black12,
-                    ),
-                    itemBuilder: (_, i) {
-                      final a = adjProvider.adjustments[i];
-                      return ListTile(
-                        title: Text(
-                          a.location ?? 'Unknown Location',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        subtitle: Text(
-                          'On hand: ${a.onHandQuantity.toStringAsFixed(2)}',
-                        ),
-                        trailing: const Icon(Icons.chevron_right),
-                        onTap: () => Navigator.pop(ctx, a),
-                      );
-                    },
-                  ),
-                ),
-              ],
-            ),
-          );
-        },
+      final selected = await AdjustmentPickerSheet.show(
+        context,
+        adjustments: adjProvider.adjustments,
       );
 
       if (selected != null) {
@@ -407,13 +398,8 @@ class _InventoryProductsListScreenState
               _dismissListeningDialog();
               _cancelListeningTimeout();
 
-              final provider = context.read<InventoryProductProvider>();
               _searchDebouncer.cancel();
-              provider.fetchProducts(
-                searchQuery: _searchController.text.trim(),
-
-                forceRefresh: true,
-              );
+              _search();
             }
           },
           listenFor: const Duration(seconds: 30),
@@ -451,7 +437,7 @@ class _InventoryProductsListScreenState
           _updateDialogCallback = () => setDialogState(() {});
 
           return AlertDialog(
-            backgroundColor: isDark ? Colors.grey[900] : Colors.white,
+            backgroundColor: isDark ? AppTheme.darkSurface : Colors.white,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(20),
             ),
@@ -459,7 +445,8 @@ class _InventoryProductsListScreenState
               'Voice Search',
               style: TextStyle(
                 color: isDark ? Colors.white : Colors.black87,
-                fontWeight: FontWeight.w600,
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
               ),
             ),
             content: Column(
@@ -554,18 +541,150 @@ class _InventoryProductsListScreenState
     }
   }
 
+  static String _snake(String s) => s.toLowerCase().replaceAll(' ', '_');
+
   void _showFilterBottomSheet() {
     final provider = context.read<InventoryProductProvider>();
 
-    showModalBottomSheet(
+    final categoryGroup = FilterGroup(
+      title: 'Category',
+      options: provider.categories
+          .map(
+            (cat) => FilterOption(
+              title: cat,
+              value: provider.selectedCategories.contains(cat),
+            ),
+          )
+          .toList(),
+    );
+
+    final stockStatusGroup = FilterGroup(
+      title: 'Stock Status',
+      options: [
+        FilterOption(title: 'In Stock', value: provider.inStockOnly == true),
+        FilterOption(
+          title: 'Out of Stock',
+          value: provider.inStockOnly == false,
+        ),
+      ],
+    );
+
+    // The types as the server defines them: Odoo 18 has no "Storable
+    // Product" / "Consumable" types any more but Goods, Service and Combo,
+    // with storable a separate `is_storable` flag on goods.
+    final productTypeGroup = FilterGroup(
+      title: 'Product Type',
+      options: [
+        for (final entry in provider.typeOptions.entries)
+          FilterOption(
+            title: entry.value,
+            value: provider.productType == entry.key,
+          ),
+        if (provider.hasStorableField)
+          FilterOption(title: 'Storable', value: provider.isStorable == true),
+      ],
+    );
+
+    final attributesGroup = FilterGroup(
+      title: 'Product Attributes',
+      options: [
+        FilterOption(title: 'Can be Sold', value: provider.saleOk == true),
+        FilterOption(
+          title: 'Can be Purchased',
+          value: provider.purchaseOk == true,
+        ),
+        // Only with the Point of Sale app installed; filtering on it
+        // otherwise fails with "Invalid field".
+        if (provider.hasPosField)
+          FilterOption(
+            title: 'Available in POS',
+            value: provider.availableInPos == true,
+          ),
+        FilterOption(title: 'Archived', value: provider.isActive == false),
+      ],
+    );
+
+    final groupByGroup = FilterGroup(
+      title: 'Group By',
+      options: provider.groupByOptions.entries
+          .map(
+            (entry) => FilterOption(
+              title: entry.value,
+              value: provider.selectedGroupBy == entry.key,
+            ),
+          )
+          .toList(),
+    );
+
+    PremiumFilterBottomSheet.show(
       context: context,
-      isScrollControlled: true,
-      useRootNavigator: true,
-      backgroundColor: Colors.transparent,
-      builder: (context) => FilterBottomSheet(
-        provider: provider,
-        onClearSearch: () => _searchController.clear(),
-      ),
+      title: 'Filter & Group By',
+      filterGroups: [
+        if (categoryGroup.options.isNotEmpty) categoryGroup,
+        stockStatusGroup,
+        if (productTypeGroup.options.isNotEmpty) productTypeGroup,
+        attributesGroup,
+      ],
+      groupByOptions: [groupByGroup],
+      onApply: (values) {
+        final selectedCategories = provider.categories
+            .where((cat) => values['category_${_snake(cat)}'] == true)
+            .toList();
+
+        final inStockOnly = values['stock_status_in_stock'] == true
+            ? true
+            : (values['stock_status_out_of_stock'] == true ? false : null);
+
+        String? productType;
+        for (final entry in provider.typeOptions.entries) {
+          if (values['product_type_${_snake(entry.value)}'] == true) {
+            productType = entry.key;
+            break;
+          }
+        }
+        final isStorable =
+            provider.hasStorableField && values['product_type_storable'] == true
+            ? true
+            : null;
+
+        final saleOk = values['product_attributes_can_be_sold'] == true
+            ? true
+            : null;
+        final purchaseOk = values['product_attributes_can_be_purchased'] == true
+            ? true
+            : null;
+        final availableInPos =
+            provider.hasPosField &&
+                values['product_attributes_available_in_pos'] == true
+            ? true
+            : null;
+        final isActive = values['product_attributes_archived'] == true
+            ? false
+            : null;
+
+        String? groupBy;
+        for (final entry in provider.groupByOptions.entries) {
+          if (values['group_by_${_snake(entry.value)}'] == true) {
+            groupBy = entry.key;
+            break;
+          }
+        }
+
+        provider.setGroupBy(groupBy);
+        provider.applyFilters(
+          categories: selectedCategories,
+          inStockOnly: inStockOnly,
+          productType: productType,
+          isStorable: isStorable,
+          saleOk: saleOk,
+          purchaseOk: purchaseOk,
+          availableInPos: availableInPos,
+          isActive: isActive,
+        );
+        if (groupBy != null) {
+          provider.fetchGroupSummary();
+        }
+      },
     );
   }
 
@@ -576,9 +695,8 @@ class _InventoryProductsListScreenState
       return null;
     }
 
-    if (_imageCache.containsKey(productId)) {
-      return _imageCache[productId];
-    }
+    final cached = _imageCache[productId];
+    if (cached != null && cached.source == base64String) return cached.bytes;
 
     try {
       var cleaned = base64String;
@@ -595,7 +713,7 @@ class _InventoryProductsListScreenState
       }
 
       final bytes = base64Decode(cleaned);
-      _imageCache[productId] = bytes;
+      _imageCache[productId] = (source: base64String, bytes: bytes);
       return bytes;
     } catch (_) {
       return null;
@@ -617,204 +735,165 @@ class _InventoryProductsListScreenState
           });
         }
 
+        _access = InventoryAccess.watch(context);
+        final compact = isCompactHeight(context);
+        // Only for users who may create products, and not on the full-screen
+        // error state (e.g. Inventory not installed).
+        final showFab =
+            _access.canCreateProducts &&
+            !(provider.error != null && provider.products.isEmpty);
+
         return Scaffold(
-          body: Column(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(color: theme.scaffoldBackgroundColor),
-                child: TextField(
-                  onTapOutside: (val) {
-                    FocusScope.of(context).unfocus();
-                  },
-                  controller: _searchController,
-                  decoration: InputDecoration(
-                    hintText: 'Search products...',
-                    hintStyle: TextStyle(
-                      color: isDark ? Colors.white70 : const Color(0xff1E1E1E),
-                      fontWeight: FontWeight.w400,
-                      fontSize: 15,
-                    ),
-                    prefixIcon: IconButton(
-                      icon: Icon(
-                        HugeIcons.strokeRoundedFilterHorizontal,
-                        color: isDark ? Colors.grey[400] : Colors.grey[600],
-                        size: 18,
-                      ),
-                      tooltip: 'Filter & Group By',
-                      onPressed: _showFilterBottomSheet,
-                    ),
-                    suffixIcon: Container(
-                      constraints: const BoxConstraints(maxWidth: 180),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        mainAxisAlignment: MainAxisAlignment.end,
-                        children: [
-                          if (_searchController.text.isNotEmpty)
-                            Transform.translate(
-                              offset: const Offset(4, 0),
-                              child: IconButton(
-                                icon: Icon(
-                                  Icons.clear,
-                                  color: isDark
-                                      ? Colors.grey[400]
-                                      : Colors.grey,
-                                  size: 20,
-                                ),
-                                onPressed: () => _searchController.clear(),
-                                padding: EdgeInsets.zero,
-                                constraints: const BoxConstraints(
-                                  minWidth: 24,
-                                  minHeight: 24,
-                                ),
-                              ),
-                            ),
-                          Transform.translate(
-                            offset: const Offset(-4, 0),
-                            child: IconButton(
-                              icon: AnimatedSwitcher(
-                                duration: const Duration(milliseconds: 200),
-                                child: _isListening
-                                    ? const Icon(
-                                        HugeIcons.strokeRoundedMic01,
-                                        key: ValueKey('listening'),
-                                        color: Colors.red,
-                                        size: 20,
-                                      )
-                                    : Icon(
-                                        HugeIcons.strokeRoundedMic01,
-                                        key: const ValueKey('idle'),
-                                        color: isDark
-                                            ? Colors.grey[400]
-                                            : Colors.grey[600],
-                                        size: 20,
-                                      ),
-                              ),
-                              onPressed: _listen,
-                              tooltip: _isListening
-                                  ? 'Listening...'
-                                  : 'Voice Search',
-                              padding: EdgeInsets.zero,
-                              constraints: const BoxConstraints(
-                                minWidth: 24,
-                                minHeight: 24,
-                              ),
-                            ),
-                          ),
-                          Transform.translate(
-                            offset: const Offset(-8, 0),
-                            child: IconButton(
-                              icon: _isScanning
-                                  ? SizedBox(
-                                      width: 18,
-                                      height: 18,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 2,
-                                        color: theme.primaryColor,
-                                      ),
-                                    )
-                                  : Icon(
-                                      HugeIcons.strokeRoundedCameraAi,
-                                      color: isDark
-                                          ? Colors.grey[400]
-                                          : Colors.grey[600],
-                                      size: 20,
-                                    ),
-                              onPressed: _isScanning ? null : _scanBarcode,
-                              tooltip: 'Scan Barcode',
-                              padding: EdgeInsets.zero,
-                              constraints: const BoxConstraints(
-                                minWidth: 24,
-                                minHeight: 24,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    filled: true,
-                    fillColor: isDark ? Colors.grey[850] : Colors.white,
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: BorderSide.none,
-                    ),
-                    focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: BorderSide(color: theme.primaryColor),
-                    ),
-                    contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 12,
-                    ),
-                    isDense: true,
+          floatingActionButton: showFab
+              ? FloatingActionButton(
+                  heroTag: 'createInventoryProductFab',
+                  onPressed: _openCreateProduct,
+                  backgroundColor: theme.primaryColor,
+                  elevation: 0,
+                  highlightElevation: 0,
+                  tooltip: 'Create Product',
+                  child: const Icon(
+                    HugeIcons.strokeRoundedPackageAdd,
+                    color: Colors.white,
                   ),
-                ),
-              ),
-
-              Consumer<InventoryProductProvider>(
-                builder: (context, provider, _) {
-                  return Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Expanded(
-                          child: SingleChildScrollView(
-                            scrollDirection: Axis.horizontal,
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                if (provider.hasLoadedOnce)
-                                  _buildActiveFiltersBadge(provider, theme),
-                                if (provider.selectedGroupBy != null) ...[
-                                  const SizedBox(width: 8),
-                                  _buildGroupByPill(
-                                    theme,
-                                    provider.selectedGroupBy,
-                                  ),
-                                ],
-                              ],
-                            ),
-                          ),
-                        ),
-                        if (provider.totalProducts > 0 && !provider.isLoading)
-                          PaginationControls(
-                            canGoToPreviousPage: provider.canGoToPreviousPage,
-                            canGoToNextPage: provider.canGoToNextPage,
-                            onPreviousPage: () => provider.goToPreviousPage(),
-                            onNextPage: () => provider.goToNextPage(),
-                            paginationText: provider.getPaginationText(),
-                            isDark: isDark,
-                            theme: theme,
-                          ),
-                      ],
-                    ),
-                  );
-                },
-              ),
-
-              Expanded(child: _buildBody(isDark, theme, provider)),
-            ],
+                )
+              : null,
+          body: CollapsibleHeaderLayout(
+            header: _buildHeader(isDark, theme, provider, compact),
+            body: _buildBody(isDark, theme, provider, compact, showFab),
           ),
         );
       },
     );
   }
 
+  /// Search bar plus the filter row (active filters, group-by, view toggle,
+  /// pagination). Pinned on a normal screen; scrolls away with the list on a
+  /// short one (see [CollapsibleHeaderLayout]).
+  Widget _buildHeader(
+    bool isDark,
+    ThemeData theme,
+    InventoryProductProvider provider,
+    bool compact,
+  ) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          padding: compact
+              ? const EdgeInsets.fromLTRB(16, 12, 16, 10)
+              : const EdgeInsets.all(16),
+          decoration: BoxDecoration(color: theme.scaffoldBackgroundColor),
+          child: MoboSearchFilterBar(
+            controller: _searchController,
+            hintText: 'Search products...',
+            hasActiveFilter: _activeFilterCount(provider) > 0,
+            onFilterTap: _showFilterBottomSheet,
+            onChanged: (value) {
+              setState(() {});
+              _onSearchChanged();
+            },
+            extraActions: [
+              SearchBarAction(
+                icon: AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 200),
+                  child: _isListening
+                      ? const Icon(
+                          HugeIcons.strokeRoundedMic01,
+                          key: ValueKey('listening'),
+                          color: StatusColors.red,
+                          size: 20,
+                        )
+                      : Icon(
+                          HugeIcons.strokeRoundedMic01,
+                          key: const ValueKey('idle'),
+                          color: isDark ? Colors.white : Colors.black,
+                          size: 20,
+                        ),
+                ),
+                onTap: _listen,
+                tooltip: _isListening ? 'Listening...' : 'Voice Search',
+              ),
+              SearchBarAction(
+                icon: _isScanning
+                    ? SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: theme.primaryColor,
+                        ),
+                      )
+                    : Icon(
+                        HugeIcons.strokeRoundedCameraAi,
+                        color: isDark ? Colors.white : Colors.black,
+                        size: 20,
+                      ),
+                onTap: _isScanning ? null : _scanBarcode,
+                tooltip: 'Scan Barcode',
+              ),
+            ],
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Row(
+            children: [
+              Expanded(
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (provider.hasLoadedOnce)
+                        _buildActiveFiltersBadge(provider, theme),
+                      if (provider.selectedGroupBy != null) ...[
+                        const SizedBox(width: 8),
+                        _buildGroupByPill(theme, provider.selectedGroupBy),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              ViewModeToggle(
+                keyPrefix: 'inventory',
+                isKanban: _isKanban,
+                isDark: isDark,
+                onChanged: _setViewMode,
+              ),
+              ..._buildPager(provider, isDark, theme),
+            ],
+          ),
+        ),
+        if (compact) const SizedBox(height: 4),
+      ],
+    );
+  }
+
+  bool _hasActiveFilters(InventoryProductProvider provider) =>
+      _searchController.text.trim().isNotEmpty ||
+      provider.selectedCategories.isNotEmpty ||
+      provider.inStockOnly != null ||
+      provider.productType != null ||
+      provider.isStorable == true ||
+      provider.saleOk != null ||
+      provider.purchaseOk != null ||
+      provider.availableInPos != null ||
+      provider.isActive == false;
+
   Widget _buildBody(
     bool isDark,
     ThemeData theme,
     InventoryProductProvider provider,
+    bool compact,
+    bool showFab,
   ) {
-    if (!provider.hasLoadedOnce && provider.products.isEmpty) {
-      return ListShimmer.buildListShimmer(
-        context,
-        itemCount: 8,
-        type: ShimmerType.product,
-      );
-    }
+    final bottomPadding = showFab ? _fabClearance : 16.0;
 
-    if (provider.isLoading && provider.products.isEmpty) {
+    if ((!provider.hasLoadedOnce || provider.isLoading) &&
+        provider.products.isEmpty) {
+      if (_isKanban) return const InventoryProductKanbanShimmer();
       return ListShimmer.buildListShimmer(
         context,
         itemCount: 8,
@@ -823,16 +902,8 @@ class _InventoryProductsListScreenState
     }
 
     if (provider.error != null && provider.products.isEmpty) {
-      final err = provider.error!.toLowerCase();
-      final isModuleNotInstalled =
-          err.contains('module') && err.contains('not installed');
-      final title = isModuleNotInstalled
-          ? 'Feature unavailable'
-          : 'Something went wrong';
-      final subtitle = isModuleNotInstalled
-          ? 'This module is not installed on your server. Please contact your administrator.'
-          : 'Pull to refresh or tap retry';
-      final lottiePath = isModuleNotInstalled
+      final info = ErrorManager.analyzeError(provider.error!);
+      final lottiePath = info.type == ErrorType.moduleNotInstalled
           ? 'assets/lotties/socialv no data.json'
           : 'assets/lotties/Error 404.json';
 
@@ -842,8 +913,8 @@ class _InventoryProductsListScreenState
           children: [
             const SizedBox(height: 48),
             EmptyState(
-              title: title,
-              subtitle: subtitle,
+              title: info.title,
+              subtitle: info.message,
               lottieAsset: lottiePath,
               actionLabel: 'Retry',
               onAction: () => provider.fetchProducts(forceRefresh: true),
@@ -855,16 +926,10 @@ class _InventoryProductsListScreenState
 
     if (provider.products.isEmpty && provider.hasLoadedOnce) {
       final hasActiveFilters =
-          provider.selectedCategories.isNotEmpty ||
-          provider.inStockOnly != null ||
-          provider.productType != null ||
-          provider.saleOk != null ||
-          provider.purchaseOk != null ||
-          provider.availableInPos != null ||
-          provider.isActive != null ||
-          provider.selectedGroupBy != null;
+          _hasActiveFilters(provider) || provider.selectedGroupBy != null;
 
       return ListView(
+        padding: EdgeInsets.only(bottom: bottomPadding),
         children: [
           const SizedBox(height: 48),
           EmptyState(
@@ -874,209 +939,394 @@ class _InventoryProductsListScreenState
                 : 'Items will appear here',
             lottieAsset: 'assets/lotties/empty ghost.json',
             actionLabel: hasActiveFilters ? 'Clear All Filters' : null,
-            onAction: hasActiveFilters
-                ? () {
-                    provider.clearFilters();
-                    provider.fetchProducts();
-                  }
-                : null,
+            onAction: hasActiveFilters ? _clearAllFilters : null,
           ),
         ],
       );
     }
 
     if (provider.isGrouped && provider.selectedGroupBy != null) {
-      if (provider.isLoading && provider.groupSummary.isEmpty) {
-        return SingleChildScrollView(
-          physics: const AlwaysScrollableScrollPhysics(),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 8),
-            child: ListShimmer.buildGroupedListShimmer(
-              context,
-              groupCount: 4,
-              itemsPerGroup: 2,
-              type: ShimmerType.product,
-            ),
-          ),
-        );
-      }
-      if (provider.groupSummary.isEmpty) {
-        final hasActiveFilters =
-            provider.selectedCategories.isNotEmpty ||
-            provider.inStockOnly != null ||
-            provider.productType != null ||
-            provider.saleOk != null ||
-            provider.purchaseOk != null ||
-            provider.availableInPos != null ||
-            provider.isActive != null;
+      return _buildGroupedBody(isDark, theme, provider, compact, bottomPadding);
+    }
 
-        return EmptyState(
-          title: 'No groups found',
-          subtitle: hasActiveFilters ? 'Try adjusting your filters' : '',
-          lottieAsset: 'assets/lotties/empty ghost.json',
-          actionLabel: hasActiveFilters ? 'Clear All Filters' : null,
-          onAction: hasActiveFilters
-              ? () {
-                  provider.clearFilters();
-                  provider.fetchProducts();
-                }
-              : null,
-        );
-      }
+    final padding = EdgeInsets.fromLTRB(16, 10, 16, bottomPadding);
 
-      for (final groupKey in provider.groupSummary.keys) {
-        if (!_expandedGroups.containsKey(groupKey)) {
-          _expandedGroups[groupKey] = false;
-        }
-      }
-
-      return Column(
-        children: [
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  '${provider.groupSummary.length} groups',
-                  style: TextStyle(
-                    color: isDark ? Colors.grey[400] : Colors.grey[600],
-                    fontSize: 14,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-                Row(
-                  children: [
-                    if (!_allGroupsExpanded && provider.groupSummary.isNotEmpty)
-                      TextButton.icon(
-                        onPressed: () async {
-                          setState(() {
-                            for (final key in provider.groupSummary.keys) {
-                              _expandedGroups[key] = true;
-                            }
-                            _allGroupsExpanded = true;
-                          });
-
-                          for (final key in provider.groupSummary.keys) {
-                            if (provider.loadedGroups[key] == null ||
-                                provider.loadedGroups[key]!.isEmpty) {
-                              await provider.loadGroupProducts(key);
-                            }
-                          }
-                        },
-                        icon: const Icon(Icons.expand_more, size: 18),
-                        label: const Text('Expand All'),
-                        style: TextButton.styleFrom(
-                          foregroundColor: isDark
-                              ? Colors.white
-                              : Colors.black87,
-                        ),
-                      ),
-                    if (_expandedGroups.values.any((expanded) => expanded))
-                      TextButton.icon(
-                        onPressed: () {
-                          setState(() {
-                            for (final key in provider.groupSummary.keys) {
-                              _expandedGroups[key] = false;
-                            }
-                            _allGroupsExpanded = false;
-                          });
-                        },
-                        icon: const Icon(Icons.expand_less, size: 18),
-                        label: const Text('Collapse All'),
-                        style: TextButton.styleFrom(
-                          foregroundColor: isDark
-                              ? Colors.white
-                              : Colors.black87,
-                        ),
-                      ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-          Expanded(
-            child: RefreshIndicator(
-              onRefresh: _onRefresh,
-              child: ListView.builder(
-                controller: _scrollController,
-                padding: const EdgeInsets.all(16),
-                itemCount: provider.groupSummary.length,
-                itemBuilder: (context, index) {
-                  final groupKey = provider.groupSummary.keys.elementAt(index);
-                  final count = provider.groupSummary[groupKey]!;
-                  final isExpanded = _expandedGroups[groupKey] ?? false;
-                  final loadedProducts = provider.loadedGroups[groupKey] ?? [];
-
-                  return _buildGroupTile(
-                    groupKey,
-                    count,
-                    loadedProducts,
-                    isExpanded,
-                    isDark,
-                    theme,
-                    provider,
-                  );
-                },
+    if (_isKanban) {
+      return RefreshIndicator(
+        onRefresh: _onRefresh,
+        color: theme.primaryColor,
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            return GridView.builder(
+              key: const ValueKey('inventoryKanbanGrid'),
+              physics: const AlwaysScrollableScrollPhysics(),
+              padding: padding,
+              gridDelegate: InventoryKanbanLayout.delegate(
+                context,
+                constraints.maxWidth - padding.horizontal,
               ),
-            ),
+              itemCount: provider.products.length,
+              itemBuilder: (context, index) => _buildKanbanCard(
+                provider.products[index],
+                isDark,
+                name: provider.products[index].displayname,
+              ),
+            );
+          },
+        ),
+      );
+    }
+
+    return RefreshIndicator(
+      onRefresh: _onRefresh,
+      color: theme.primaryColor,
+      child: ListView.builder(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: padding,
+        itemCount: provider.products.length,
+        itemBuilder: (context, index) {
+          final product = provider.products[index];
+          return _buildListTile(product, isDark, name: product.displayname);
+        },
+      ),
+    );
+  }
+
+  Widget _buildListTile(
+    InventoryProduct product,
+    bool isDark, {
+    required String name,
+  }) {
+    return InventoryProductListTile(
+      id: product.id.toString(),
+      name: name,
+      defaultCode: product.defaultCode,
+      barcode: product.barcode,
+      qtyOnHand: product.qtyOnHand,
+      qtyIncoming: product.qtyIncoming,
+      qtyOutgoing: product.qtyOutgoing,
+      qtyAvailable: product.qtyAvailable,
+      freeQty: product.freeQty,
+      avgCost: product.avgCost,
+      totalValue: product.totalValue,
+      uomName: product.uomName,
+      category: product.categoryName,
+      imageBytes: _decodeImage(product.imageSmall, product.id),
+      isDark: isDark,
+      onTap: () => _openProductDetail(product.id),
+      onEdit: _access.canCountStock
+          ? () => _openAdjustmentForProduct(product)
+          : null,
+      onLocate: () => _openViewStock(product),
+    );
+  }
+
+  Widget _buildKanbanCard(
+    InventoryProduct product,
+    bool isDark, {
+    required String name,
+    bool compact = false,
+  }) {
+    return InventoryProductKanbanCard(
+      key: ValueKey('inventoryKanbanCard_${product.id}'),
+      compact: compact,
+      name: name,
+      defaultCode: product.defaultCode,
+      qtyOnHand: product.qtyOnHand,
+      freeQty: product.freeQty,
+      listPrice: product.listPrice,
+      uomName: product.uomName,
+      imageBytes: _decodeImage(product.imageSmall, product.id),
+      isDark: isDark,
+      onTap: () => _openProductDetail(product.id),
+      onEdit: _access.canCountStock
+          ? () => _openAdjustmentForProduct(product)
+          : null,
+      onLocate: () => _openViewStock(product),
+    );
+  }
+
+  Widget _buildGroupedBody(
+    bool isDark,
+    ThemeData theme,
+    InventoryProductProvider provider,
+    bool compact,
+    double bottomPadding,
+  ) {
+    if (provider.isLoading && provider.groupSummary.isEmpty) {
+      return SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          child: ListShimmer.buildGroupedListShimmer(
+            context,
+            groupCount: 4,
+            itemsPerGroup: 2,
+            type: ShimmerType.product,
+          ),
+        ),
+      );
+    }
+    if (provider.groupSummary.isEmpty) {
+      final hasActiveFilters = _hasActiveFilters(provider);
+
+      return ListView(
+        padding: EdgeInsets.only(bottom: bottomPadding),
+        children: [
+          const SizedBox(height: 48),
+          EmptyState(
+            title: 'No groups found',
+            subtitle: hasActiveFilters ? 'Try adjusting your filters' : '',
+            lottieAsset: 'assets/lotties/empty ghost.json',
+            actionLabel: hasActiveFilters ? 'Clear All Filters' : null,
+            onAction: hasActiveFilters ? _clearAllFilters : null,
           ),
         ],
       );
     }
 
-    return Column(
-      children: [
-        Expanded(
-          child: RefreshIndicator(
-            onRefresh: _onRefresh,
-            color: theme.primaryColor,
-            child: ListView.builder(
-              controller: _scrollController,
-              padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 16),
-              itemCount: provider.products.length,
-              itemBuilder: (context, index) {
-                final product = provider.products[index];
-                final imageBytes = _decodeImage(product.imageSmall, product.id);
-
-                return InventoryProductListTile(
-                  id: product.id.toString(),
-                  name: product.displayname,
-                  defaultCode: product.defaultCode,
-                  barcode: product.barcode,
-                  qtyOnHand: product.qtyOnHand,
-                  qtyIncoming: product.qtyIncoming,
-                  qtyOutgoing: product.qtyOutgoing,
-                  qtyAvailable: product.qtyAvailable,
-                  freeQty: product.freeQty,
-                  avgCost: product.avgCost,
-                  totalValue: product.totalValue,
-                  uomName: product.uomName,
-                  category: product.categoryName,
-                  imageBytes: imageBytes,
-                  isDark: isDark,
-                  onTap: () {
-                    context.pushNamed(
-                      AppRoutes.inventoryProductDetail,
-                      extra: {'productId': product.id},
-                    );
-                  },
-                  onEdit: () => _openAdjustmentForProduct(product),
-                  onLocate: () {
-                    context.pushNamed(
-                      AppRoutes.viewStock,
-                      extra: {
-                        'productId': product.id,
-                        'productName': product.displayname,
-                      },
-                    );
-                  },
-                );
-              },
-            ),
+    if (_isKanban) {
+      // Odoo's grouped kanban: a column per group, scrolled sideways.
+      return MoboKanbanBoard<InventoryProduct>(
+        key: ValueKey('inventoryKanbanBoard_${provider.selectedGroupBy}'),
+        groups: provider.groupSummary,
+        loadedGroups: provider.loadedGroups,
+        onLoadGroup: provider.loadGroupProducts,
+        onLoadMore: provider.loadMoreGroupProducts,
+        onRefresh: _reloadAfterChange,
+        bottomPadding: bottomPadding,
+        itemBuilder: (context, product) => Padding(
+          padding: const EdgeInsets.only(bottom: 10),
+          child: _buildKanbanCard(
+            product,
+            isDark,
+            name: product.displayname,
+            compact: true,
           ),
         ),
+      );
+    }
+
+    // A group the search (or a filter) dropped is no longer open: it would
+    // otherwise come back open, on a spinner that never ends.
+    _expandedGroups.removeWhere(
+      (key, _) => !provider.groupSummary.containsKey(key),
+    );
+    for (final groupKey in provider.groupSummary.keys) {
+      if (!_expandedGroups.containsKey(groupKey)) {
+        _expandedGroups[groupKey] = false;
+      }
+    }
+    _allGroupsExpanded =
+        _expandedGroups.isNotEmpty &&
+        _expandedGroups.values.every((expanded) => expanded);
+
+    final groupKeys = provider.groupSummary.keys.toList();
+    // On a short screen the "N groups / Expand All" row is the list's first
+    // item, so it scrolls away too instead of staying pinned.
+    final leading = compact ? 1 : 0;
+
+    final list = RefreshIndicator(
+      onRefresh: _reloadAfterChange,
+      color: theme.primaryColor,
+      child: ListView.builder(
+        key: const ValueKey('inventoryGroupedList'),
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: EdgeInsets.fromLTRB(16, compact ? 4 : 16, 16, bottomPadding),
+        itemCount: groupKeys.length + leading,
+        itemBuilder: (context, index) {
+          if (index < leading) {
+            return _buildGroupSummaryRow(
+              provider,
+              isDark,
+              padding: const EdgeInsets.only(bottom: 8),
+            );
+          }
+          final groupKey = groupKeys[index - leading];
+          return _buildGroupTile(
+            groupKey,
+            provider.groupSummary[groupKey] ?? 0,
+            provider.loadedGroups[groupKey] ?? const [],
+            _expandedGroups[groupKey] ?? false,
+            isDark,
+            theme,
+            provider,
+          );
+        },
+      ),
+    );
+
+    if (compact) return list;
+
+    return Column(
+      children: [
+        _buildGroupSummaryRow(
+          provider,
+          isDark,
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        ),
+        Expanded(child: list),
       ],
+    );
+  }
+
+  /// "N groups" with the Expand All / Collapse All actions.
+  Widget _buildGroupSummaryRow(
+    InventoryProductProvider provider,
+    bool isDark, {
+    required EdgeInsets padding,
+  }) {
+    final actionStyle = TextButton.styleFrom(
+      foregroundColor: isDark ? Colors.white : Colors.black87,
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      visualDensity: VisualDensity.compact,
+    );
+    final showExpand = !_allGroupsExpanded && provider.groupSummary.isNotEmpty;
+    final showCollapse = _expandedGroups.values.any((expanded) => expanded);
+
+    return Padding(
+      key: const ValueKey('inventoryGroupSummaryRow'),
+      padding: padding,
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              '${provider.groupSummary.length} groups',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: isDark ? Colors.grey[400] : Colors.grey[600],
+                fontSize: 14,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+          if (showExpand || showCollapse)
+            // Both actions show while only some groups are open; on a narrow
+            // phone they shrink to fit rather than overflow the row.
+            Flexible(
+              flex: 3,
+              child: Align(
+                alignment: Alignment.centerRight,
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (showExpand)
+                        TextButton.icon(
+                          onPressed: () async {
+                            setState(() {
+                              for (final key in provider.groupSummary.keys) {
+                                _expandedGroups[key] = true;
+                              }
+                              _allGroupsExpanded = true;
+                            });
+
+                            for (final key in provider.groupSummary.keys) {
+                              if (provider.loadedGroups[key] == null ||
+                                  provider.loadedGroups[key]!.isEmpty) {
+                                await provider.loadGroupProducts(key);
+                              }
+                            }
+                          },
+                          icon: const Icon(Icons.expand_more, size: 18),
+                          label: const Text('Expand All'),
+                          style: actionStyle,
+                        ),
+                      if (showCollapse)
+                        TextButton.icon(
+                          onPressed: () {
+                            setState(() {
+                              for (final key in provider.groupSummary.keys) {
+                                _expandedGroups[key] = false;
+                              }
+                              _allGroupsExpanded = false;
+                            });
+                          },
+                          icon: const Icon(Icons.expand_less, size: 18),
+                          label: const Text('Collapse All'),
+                          style: actionStyle,
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// The pager beside the view toggle, as Odoo shows it: ungrouped it
+  /// pages the products; a grouped list pages its groups (each group's
+  /// header carries its own count); a grouped kanban has none — each column
+  /// shows its count.
+  List<Widget> _buildPager(
+    InventoryProductProvider provider,
+    bool isDark,
+    ThemeData theme,
+  ) {
+    if (provider.isGrouped && provider.selectedGroupBy != null) {
+      if (_isKanban || provider.groupSummary.isEmpty) return const [];
+      return [
+        const SizedBox(width: 8),
+        PaginationControls(
+          canGoToPreviousPage: false,
+          canGoToNextPage: false,
+          onPreviousPage: () {},
+          onNextPage: () {},
+          paginationText: PaginationControls.groupsText(
+            provider.groupSummary.length,
+          ),
+          isDark: isDark,
+          theme: theme,
+        ),
+      ];
+    }
+    if (provider.totalProducts == 0 || provider.isLoading) return const [];
+    return [
+      const SizedBox(width: 8),
+      PaginationControls(
+        canGoToPreviousPage: provider.canGoToPreviousPage,
+        canGoToNextPage: provider.canGoToNextPage,
+        onPreviousPage: () => provider.goToPreviousPage(),
+        onNextPage: () => provider.goToNextPage(),
+        paginationText: provider.getPaginationText(),
+        isDark: isDark,
+        theme: theme,
+      ),
+    ];
+  }
+
+  /// "Load more" at the foot of an expanded group showing fewer products
+  /// than its count.
+  Widget _buildGroupLoadMore(
+    InventoryProductProvider provider,
+    String groupKey,
+    int remaining,
+  ) {
+    final loading = _loadingMoreGroups.contains(groupKey);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: TextButton(
+        onPressed: loading
+            ? null
+            : () async {
+                setState(() => _loadingMoreGroups.add(groupKey));
+                await provider.loadMoreGroupProducts(groupKey);
+                if (mounted) {
+                  setState(() => _loadingMoreGroups.remove(groupKey));
+                }
+              },
+        child: loading
+            ? const SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            : Text('Load more ($remaining)'),
+      ),
     );
   }
 
@@ -1111,105 +1361,43 @@ class _InventoryProductsListScreenState
   }
 
   Widget _buildGroupByPill(ThemeData theme, String? groupBy) {
-    final label = _groupByLabel(groupBy);
-    final isDark = theme.brightness == Brightness.dark;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: theme.brightness == Brightness.dark
-            ? Colors.white70
-            : Colors.black,
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(
-            Icons.layers_outlined,
-            size: 14,
-            color: isDark ? Colors.black : Colors.white,
-          ),
-          const SizedBox(width: 4),
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w500,
-              color: isDark ? Colors.black : Colors.white,
-            ),
-          ),
-        ],
-      ),
-    );
+    return GroupByPill(label: _groupByLabel(groupBy), theme: theme);
   }
 
-  Widget _buildActiveFiltersBadge(
-    InventoryProductProvider provider,
-    ThemeData theme,
-  ) {
+  int _activeFilterCount(InventoryProductProvider provider) {
     int count = 0;
 
     if (provider.selectedCategories.isNotEmpty) count++;
     if (provider.inStockOnly != null) count++;
     if (provider.productType != null) count++;
 
-    if (provider.isStorable != null && provider.isStorable == false) count++;
+    if (provider.isStorable == true) count++;
     if (provider.availableInPos != null) count++;
     if (provider.saleOk != null) count++;
     if (provider.purchaseOk != null) count++;
     if (provider.hasActivityException != null) count++;
-    if (provider.isActive != null) count++;
+    if (provider.isActive == false) count++;
     if (provider.hasNegativeStock != null) count++;
     if (_searchController.text.trim().isNotEmpty) count++;
 
-    final bool isDark = theme.brightness == Brightness.dark;
-    final bool hasGroupBy = provider.selectedGroupBy != null;
+    return count;
+  }
 
-    if (count == 0) {
-      if (hasGroupBy) {
-        return const SizedBox.shrink();
-      }
-      return Padding(
-        padding: const EdgeInsets.symmetric(vertical: 4),
-        child: Text(
-          'No filters applied',
-          style: TextStyle(
-            fontSize: 12,
-            color: isDark
-                ? Colors.white70
-                : theme.colorScheme.onSurface.withOpacity(0.7),
-            fontWeight: FontWeight.w500,
-          ),
-        ),
-      );
-    }
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: isDark ? Colors.white70 : Colors.black,
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            '$count Active',
-            style: TextStyle(
-              fontSize: 12,
-              color: isDark ? Colors.black : Colors.white,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-        ],
-      ),
+  Widget _buildActiveFiltersBadge(
+    InventoryProductProvider provider,
+    ThemeData theme,
+  ) {
+    return ActiveFiltersBadge(
+      count: _activeFilterCount(provider),
+      theme: theme,
+      hasGroupBy: provider.selectedGroupBy != null,
     );
   }
 
   Widget _buildGroupTile(
     String groupKey,
     int count,
-    List<dynamic> loadedProducts,
+    List<InventoryProduct> loadedProducts,
     bool isExpanded,
     bool isDark,
     ThemeData theme,
@@ -1217,22 +1405,16 @@ class _InventoryProductsListScreenState
   ) {
     return Container(
       decoration: BoxDecoration(
+        // grey[900] in dark so the grey[850] product cards nested inside
+        // the expanded group stay visible.
         color: isDark ? Colors.grey[900] : Colors.white,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(AppRadius.lg),
         border: Border.all(
           color: isDark
-              ? Colors.white.withOpacity(0.08)
-              : Colors.black.withOpacity(0.06),
+              ? Colors.white.withValues(alpha: 0.08)
+              : Colors.black.withValues(alpha: 0.06),
         ),
-        boxShadow: [
-          if (!isDark)
-            BoxShadow(
-              blurRadius: 16,
-              spreadRadius: 2,
-              offset: const Offset(0, 6),
-              color: Colors.black.withOpacity(0.08),
-            ),
-        ],
+        boxShadow: AppShadows.card,
       ),
       margin: const EdgeInsets.only(bottom: 12),
       child: Column(
@@ -1306,38 +1488,16 @@ class _InventoryProductsListScreenState
                 padding: const EdgeInsets.all(24),
                 child: CircularProgressIndicator(color: theme.primaryColor),
               )
-            else
-              ...loadedProducts.map((product) {
-                final imageBytes = _decodeImage(product.imageSmall, product.id);
-                return InventoryProductListTile(
-                  id: product.id.toString(),
-                  name: product.name,
-                  defaultCode: product.defaultCode,
-                  barcode: product.barcode,
-                  qtyOnHand: product.qtyOnHand,
-                  qtyIncoming: product.qtyIncoming,
-                  qtyOutgoing: product.qtyOutgoing,
-                  qtyAvailable: product.qtyAvailable,
-                  freeQty: product.freeQty,
-                  avgCost: product.avgCost,
-                  totalValue: product.totalValue,
-                  uomName: product.uomName,
-                  category: product.categoryName,
-                  imageBytes: imageBytes,
-                  isDark: isDark,
-                  onTap: () {},
-                  onEdit: () => _openAdjustmentForProduct(product),
-                  onLocate: () {
-                    context.pushNamed(
-                      AppRoutes.viewStock,
-                      extra: {
-                        'productId': product.id,
-                        'productName': product.name,
-                      },
-                    );
-                  },
-                );
-              }),
+            else ...[
+              for (final product in loadedProducts)
+                _buildListTile(product, isDark, name: product.displayname),
+              if (loadedProducts.length < count)
+                _buildGroupLoadMore(
+                  provider,
+                  groupKey,
+                  count - loadedProducts.length,
+                ),
+            ],
           ],
         ],
       ),

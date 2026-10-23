@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../core/theme/app_theme.dart';
+
 /// A professional list tile variant used for primary actions in profile or settings screens.
 class ActionTile extends StatelessWidget {
   final String title;
@@ -23,10 +25,10 @@ class ActionTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final Color titleColor = destructive
-        ? const Color(0xFFD32F2F)
+        ? StatusColors.red
         : (isDark ? Colors.white : Colors.black87);
     final Color iconColor = destructive
-        ? const Color(0xFFD32F2F)
+        ? StatusColors.red
         : (isDark ? Colors.grey[400]! : Colors.grey[600]!);
 
     return ListTile(

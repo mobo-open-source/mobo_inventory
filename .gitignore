@@ -1,8 +1,13 @@
-# Miscellaneous
+key.properties
+*.save
+*.pem
+*.keystore
+*.jks
 *.class
 *.log
 *.pyc
 *.swp
+*.txt
 .DS_Store
 .atom/
 .build/
@@ -11,27 +16,34 @@
 .svn/
 .swiftpm/
 migrate_working_dir/
+*.zip
 
 # IntelliJ related
 *.iml
 *.ipr
 *.iws
 .idea/
+out/
+gen/
 
-# The .vscode folder contains launch configuration and tasks you configure in
-# VS Code which you may wish to be included in version control, so this line
-# is commented out by default.
-#.vscode/
+# Visual Studio Code
+.vscode/
+.vsc/
+*.code-workspace
 
 # Flutter/Dart/Pub related
 **/doc/api/
 **/ios/Flutter/.last_build_id
 .dart_tool/
 .flutter-plugins-dependencies
+.flutter-plugins
 .pub-cache/
 .pub/
 /build/
 /coverage/
+pubspec.lock
+Dockerfile
+windows/
 
 # Symbolication related
 app.*.symbols
@@ -43,3 +55,27 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+android/local.properties
+android/key.properties
+
+# iOS related
+ios/Flutter/Generated.xcconfig
+ios/Flutter/flutter_export_environment.sh
+ios/Flutter/ephemeral/
+# ios/Flutter/AppFrameworkInfo.plist (Restored)
+DerivedData/
+*.pbxuser
+*.mode1v3
+*.mode2v3
+*.perspectivev3
+xcuserdata/
+*.xccheckout
+*.moved-aside
+*.swp
+*.lock
+*.dat
+
+# SonarQube
+.scannerwork/
+sonar-project.properties
+sonar-flutter-plugin-*.jar

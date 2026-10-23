@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:hugeicons/hugeicons.dart';
 import 'package:lottie/lottie.dart';
+import 'package:shimmer/shimmer.dart';
+import '../../../core/theme/app_theme.dart';
 import '../models/recent_activity.dart';
 
 class RecentActivitiesList extends StatelessWidget {
@@ -28,34 +30,30 @@ class RecentActivitiesList extends StatelessWidget {
               'Recent Activities',
               style: TextStyle(
                 fontSize: 18,
-                fontWeight: FontWeight.w700,
-                color: isDark ? Colors.white : Colors.black87,
+                fontWeight: FontWeight.bold,
+                color: isDark ? Colors.white : AppTheme.textPrimary,
               ),
             ),
             const Spacer(),
             if (onSeeAll != null)
-              TextButton(
-                onPressed: onSeeAll,
-                child: const Text('See all'),
-              ),
+              TextButton(onPressed: onSeeAll, child: const Text('See all')),
           ],
         ),
         const SizedBox(height: 8),
         if (isLoading && items.isEmpty)
           _shimmerList(context)
         else if (items.isEmpty)
-          _emptyState(context,isDark,'No recent activity')
+          _emptyState(context, isDark, 'No recent activity')
         else
           LayoutBuilder(
             builder: (context, constraints) {
               final isWide = constraints.maxWidth >= 700;
               if (isWide) {
-
                 return ListView.separated(
                   physics: const NeverScrollableScrollPhysics(),
                   shrinkWrap: true,
                   itemCount: items.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: 8),
+                  separatorBuilder: (_, __) => const SizedBox(height: 12),
                   itemBuilder: (ctx, i) => _tile(context, items[i]),
                 );
               }
@@ -67,10 +65,8 @@ class RecentActivitiesList extends StatelessWidget {
                   itemCount: items.length,
                   padding: EdgeInsets.zero,
                   separatorBuilder: (_, __) => const SizedBox(width: 12),
-                  itemBuilder: (ctx, i) => SizedBox(
-                    width: 260,
-                    child: _tile(context, items[i]),
-                  ),
+                  itemBuilder: (ctx, i) =>
+                      SizedBox(width: 260, child: _tile(context, items[i])),
                 ),
               );
             },
@@ -79,13 +75,10 @@ class RecentActivitiesList extends StatelessWidget {
     );
   }
 
-  Widget _emptyState(BuildContext context, bool isDark , String errtext) {
+  Widget _emptyState(BuildContext context, bool isDark, String errtext) {
     return Container(
       padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: isDark ? Colors.grey[900] : Theme.of(context).scaffoldBackgroundColor,
-        borderRadius: BorderRadius.circular(12),
-      ),
+      decoration: AppTheme.cardDecoration(isDark),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -122,29 +115,18 @@ class RecentActivitiesList extends StatelessWidget {
     final subtitle = '${a.type.toUpperCase()} • ${a.state.toUpperCase()}';
 
     return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: isDark ? Colors.grey[900] : Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: isDark ? Colors.grey[800]! : Colors.grey[200]!),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(isDark ? 0.15 : 0.05),
-            offset: const Offset(0, 2),
-            blurRadius: 6,
-          ),
-        ],
-      ),
+      padding: const EdgeInsets.all(14),
+      decoration: AppTheme.cardDecoration(isDark),
       child: Row(
         children: [
           Container(
-            width: 36,
-            height: 36,
+            width: 46,
+            height: 46,
             decoration: BoxDecoration(
-              color: color.withOpacity(0.12),
-              borderRadius: BorderRadius.circular(10),
+              color: color.withValues(alpha: 0.1),
+              shape: BoxShape.circle,
             ),
-            child: Icon(a.iconForType(), color: color, size: 18),
+            child: Icon(a.iconForType(), color: color, size: 22),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -156,9 +138,9 @@ class RecentActivitiesList extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
-                    fontSize: 14,
+                    fontSize: 15,
                     fontWeight: FontWeight.w600,
-                    color: isDark ? Colors.white : Colors.black87,
+                    color: isDark ? Colors.white : AppTheme.textPrimary,
                   ),
                 ),
                 const SizedBox(height: 2),
@@ -167,7 +149,7 @@ class RecentActivitiesList extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
-                    fontSize: 12,
+                    fontSize: 13,
                     color: isDark ? Colors.grey[400] : Colors.grey[600],
                   ),
                 ),
@@ -177,7 +159,10 @@ class RecentActivitiesList extends StatelessWidget {
           const SizedBox(width: 8),
           Text(
             _formatAgo(a.date),
-            style: TextStyle(fontSize: 12, color: isDark ? Colors.grey[400] : Colors.grey[600]),
+            style: TextStyle(
+              fontSize: 12,
+              color: isDark ? Colors.grey[400] : Colors.grey[600],
+            ),
           ),
         ],
       ),
@@ -186,18 +171,23 @@ class RecentActivitiesList extends StatelessWidget {
 
   Widget _shimmerList(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    return Column(
-      children: List.generate(4, (i) => i)
-          .map((_) => Container(
-                margin: const EdgeInsets.only(bottom: 8),
-                height: 60,
+    return Shimmer.fromColors(
+      baseColor: isDark ? Colors.grey[800]! : Colors.grey[300]!,
+      highlightColor: isDark ? Colors.grey[700]! : Colors.grey[100]!,
+      child: Column(
+        children: List.generate(4, (i) => i)
+            .map(
+              (_) => Container(
+                margin: const EdgeInsets.only(bottom: 12),
+                height: 74,
                 decoration: BoxDecoration(
-                  color: isDark ? Colors.grey[900] : Colors.white,
+                  color: isDark ? Colors.grey[850] : Colors.white,
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: isDark ? Colors.grey[800]! : Colors.grey[200]!),
                 ),
-              ))
-          .toList(),
+              ),
+            )
+            .toList(),
+      ),
     );
   }
 

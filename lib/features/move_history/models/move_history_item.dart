@@ -1,3 +1,4 @@
+import '../../../core/utils/odoo_value.dart';
 
 class MoveHistoryItem {
   final int id;
@@ -33,7 +34,6 @@ class MoveHistoryItem {
   });
 
   factory MoveHistoryItem.fromJson(Map<String, dynamic> json) {
-
     int? productId;
     String? productName;
     final p = json['product_id'];
@@ -83,8 +83,8 @@ class MoveHistoryItem {
       reference = mv['name']?.toString() ?? mv['display_name']?.toString();
     } else if (mv is List && mv.isNotEmpty) {
       reference = mv.length > 1 ? mv[1].toString() : null;
-    } else if (json['reference'] != null) {
-      reference = json['reference'].toString();
+    } else {
+      reference = odooString(json['reference']);
     }
 
     String? transfer;
@@ -101,7 +101,13 @@ class MoveHistoryItem {
       date = DateTime.tryParse(d);
     }
 
-    final qty = (json['quantity'] ?? json['qty_done'] ?? json['quantity_done'] ?? json['product_uom_qty'] ?? 0) as num;
+    final qty =
+        (json['quantity'] ??
+                json['qty_done'] ??
+                json['quantity_done'] ??
+                json['product_uom_qty'] ??
+                0)
+            as num;
 
     return MoveHistoryItem(
       id: json['id'] as int,

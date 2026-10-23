@@ -1,106 +1,46 @@
-import 'package:flutter/foundation.dart';
 import '../../../core/services/odoo_session_manager.dart';
 import '../models/inventory_product.dart';
+import '../../../core/odoo/odoo_read_group.dart';
+import 'inventory_product_service.dart';
 
 /// Service for fetching grouped product data (e.g., by category or type) from Odoo.
 class InventoryGroupService {
-  /// Fetches a summary of counts for different groups based on the [groupByField].
+  /// Counts the products matching [domain] per value of [groupByField].
+  ///
+  /// [domainsOut] is filled with each group's own Odoo domain, keyed like the
+  /// returned map, for [fetchGroupProducts]. [typeLabels] names the `type`
+  /// values as the server does (Odoo 18 calls `consu` "Goods").
   Future<Map<String, int>> fetchGroupSummary({
     required String groupByField,
-    String? searchQuery,
-    List<String>? categories,
-    bool? inStockOnly,
-    String? productType,
-    bool? isStorable,
-    bool? availableInPos,
-    bool? saleOk,
-    bool? purchaseOk,
-    bool? hasActivityException,
-    bool? isActive,
-    bool? hasNegativeStock,
+    required List<dynamic> domain,
+    Map<String, List<dynamic>>? domainsOut,
+    Map<String, String> typeLabels = const {},
   }) async {
     try {
-      List<dynamic> domain = [];
-
-      if (categories != null && categories.isNotEmpty) {
-        if (categories.length == 1) {
-          domain.add(['categ_id.name', '=', categories.first]);
-        } else {
-          for (int i = 0; i < categories.length - 1; i++) {
-            domain.add('|');
-          }
-          for (final cat in categories) {
-            domain.add(['categ_id.name', '=', cat]);
-          }
-        }
-      }
-
-      if (inStockOnly == true) {
-        domain.add(['qty_available', '>', 0]);
-      } else if (inStockOnly == false) {
-        domain.add(['qty_available', '<=', 0]);
-      }
-
-      if (productType != null) {
-        domain.add(['type', '=', productType]);
-      }
-
-      if (availableInPos == true) {
-        domain.add(['available_in_pos', '=', true]);
-      }
-
-      if (saleOk == true) {
-        domain.add(['sale_ok', '=', true]);
-      }
-
-      if (purchaseOk == true) {
-        domain.add(['purchase_ok', '=', true]);
-      }
-
-      if (hasActivityException == true) {
-        domain.add(['activity_exception_decoration', '!=', false]);
-      }
-
-      if (isActive == false) {
-        domain.add(['active', '=', false]);
-      }
-
-      if (hasNegativeStock == true) {
-        domain.add('|');
-        domain.add(['qty_available', '>', 0]);
-        domain.add(['virtual_available', '<', 0]);
-      }
-
-      if (searchQuery != null && searchQuery.isNotEmpty) {
-        domain.add('|');
-        domain.add(['name', 'ilike', searchQuery]);
-        domain.add('|');
-        domain.add(['default_code', 'ilike', searchQuery]);
-        domain.add(['barcode', 'ilike', searchQuery]);
-      }
-
-      final result = await OdooSessionManager.callKwWithCompany({
-        'model': 'product.product',
-        'method': 'read_group',
-        'args': [domain],
-        'kwargs': {
-          'fields': ['id'],
-          'groupby': [groupByField],
-          'lazy': false,
-          'context': {'bin_size': true, 'default_is_storable': true},
-        },
-      });
+      final result = await OdooReadGroup.counts(
+        model: 'product.product',
+        domain: domain,
+        groupBy: groupByField,
+        context: {'bin_size': true, 'default_is_storable': true},
+      );
 
       final groupSummary = <String, int>{};
 
-      if (result is List) {
-        for (final group in result) {
-          if (group is Map) {
-            final groupKey = _getGroupKeyFromReadGroup(group, groupByField);
-            final count = (group['__count'] ?? 0) as int;
-            groupSummary[groupKey] = count;
-          }
-        }
+      for (final group in result) {
+        final groupKey = _getGroupKeyFromReadGroup(
+          group,
+          groupByField,
+          typeLabels,
+        );
+        final count = (group['__count'] ?? 0) as int;
+        groupSummary[groupKey] = count;
+        final groupDomain = group['__domain'];
+        domainsOut?[groupKey] = groupDomain is List
+            ? List<dynamic>.from(groupDomain)
+            : [
+                ...domain,
+                [groupByField, '=', _rawValue(group[groupByField])],
+              ];
       }
 
       return groupSummary;
@@ -109,9 +49,15 @@ class InventoryGroupService {
     }
   }
 
+  static dynamic _rawValue(dynamic value) {
+    if (value is List && value.isNotEmpty) return value.first;
+    return value ?? false;
+  }
+
   String _getGroupKeyFromReadGroup(
     Map<dynamic, dynamic> group,
     String groupByField,
+    Map<String, String> typeLabels,
   ) {
     try {
       final value = group[groupByField];
@@ -122,6 +68,8 @@ class InventoryGroupService {
         }
         return 'Uncategorized';
       } else if (groupByField == 'type') {
+        final label = typeLabels[value?.toString()];
+        if (label != null) return label;
         if (value == 'product') return 'Storable Product';
         if (value == 'consu') return 'Consumable';
         if (value == 'service') return 'Service';
@@ -139,153 +87,25 @@ class InventoryGroupService {
     }
   }
 
-  List<dynamic> buildGroupDomain(String groupKey, String groupByField) {
-    try {
-      switch (groupByField) {
-        case 'categ_id':
-          if (groupKey == 'Uncategorized') {
-            return [
-              ['categ_id', '=', false],
-            ];
-          }
-          return [
-            ['categ_id.name', '=', groupKey],
-          ];
-
-        case 'type':
-          String odooValue;
-          switch (groupKey) {
-            case 'Consumable':
-              odooValue = 'consu';
-              break;
-            case 'Service':
-              odooValue = 'service';
-              break;
-            case 'Storable Product':
-              odooValue = 'product';
-              break;
-            default:
-              odooValue = groupKey.toLowerCase();
-          }
-          return [
-            ['type', '=', odooValue],
-          ];
-
-        case 'pos_categ_ids':
-          if (groupKey == 'No POS Category') {
-            return [
-              ['pos_categ_ids', '=', false],
-            ];
-          }
-          return [
-            ['pos_categ_ids.name', '=', groupKey],
-          ];
-
-        default:
-          if (groupKey == 'Unknown') {
-            return [
-              [groupByField, '=', false],
-            ];
-          }
-          return [
-            [groupByField, '=', groupKey],
-          ];
-      }
-    } catch (e) {
-      return [];
-    }
-  }
-
+  /// The products of one group, selected by the group's own [domain] from
+  /// [fetchGroupSummary].
   Future<List<InventoryProduct>> fetchGroupProducts({
-    required String groupKey,
-    required String groupByField,
-    String? searchQuery,
-    List<String>? categories,
-    bool? inStockOnly,
-    String? productType,
-    bool? isStorable,
-    bool? availableInPos,
-    bool? saleOk,
-    bool? purchaseOk,
-    bool? hasActivityException,
-    bool? isActive,
-    bool? hasNegativeStock,
+    required List<dynamic> domain,
     int limit = 80,
     int offset = 0,
   }) async {
     try {
-      List<dynamic> domain = [];
-
-      final groupDomain = buildGroupDomain(groupKey, groupByField);
-      domain.addAll(groupDomain);
-
-      if (categories != null && categories.isNotEmpty) {
-        if (categories.length == 1) {
-          domain.add(['categ_id.name', '=', categories.first]);
-        } else {
-          for (int i = 0; i < categories.length - 1; i++) {
-            domain.add('|');
-          }
-          for (final cat in categories) {
-            domain.add(['categ_id.name', '=', cat]);
-          }
-        }
-      }
-
-      if (inStockOnly == true) {
-        domain.add(['qty_available', '>', 0]);
-      } else if (inStockOnly == false) {
-        domain.add(['qty_available', '<=', 0]);
-      }
-
-      if (productType != null) {
-        domain.add(['type', '=', productType]);
-      }
-
-      if (availableInPos == true) {
-        domain.add(['available_in_pos', '=', true]);
-      }
-
-      if (saleOk == true) {
-        domain.add(['sale_ok', '=', true]);
-      }
-
-      if (purchaseOk == true) {
-        domain.add(['purchase_ok', '=', true]);
-      }
-
-      if (hasActivityException == true) {
-        domain.add(['activity_exception_decoration', '!=', false]);
-      }
-
-      if (isActive == false) {
-        domain.add(['active', '=', false]);
-      }
-
-      if (hasNegativeStock == true) {
-        domain.add('|');
-        domain.add(['qty_available', '>', 0]);
-        domain.add(['virtual_available', '<', 0]);
-      }
-
-      if (searchQuery != null && searchQuery.isNotEmpty) {
-        domain.add('|');
-        domain.add(['name', 'ilike', searchQuery]);
-        domain.add('|');
-        domain.add(['default_code', 'ilike', searchQuery]);
-        domain.add(['barcode', 'ilike', searchQuery]);
-      }
-
       final result = await OdooSessionManager.callKwWithCompany({
         'model': 'product.product',
         'method': 'search_read',
         'args': [],
         'kwargs': {
           'domain': domain,
-          'fields': [],
+          'fields': InventoryProductService.listFields,
           'limit': limit,
           'offset': offset,
-          'context': {'bin_size': true, 'default_is_storable': true},
+          // Like the flat list: image_128 comes back as base64, not a size.
+          'context': {'bin_size': false, 'default_is_storable': true},
         },
       });
 

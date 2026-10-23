@@ -1,15 +1,29 @@
 import 'dart:convert';
-import 'package:flutter/foundation.dart';
 import 'package:odoo_rpc/odoo_rpc.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../../core/services/odoo_session_manager.dart';
 import '../models/manufacturing_transfer_model.dart';
+import '../../../core/odoo/odoo_compat.dart';
+import '../../../core/odoo/odoo_read_group.dart';
 
 class ManufacturingService {
+  /// Odoo's Manufacturing Orders menu opens on its "To Do" filter: the
+  /// orders still to be worked on. The dashboard's Manufacturing Orders
+  /// count and the list that card opens both use these states, so the
+  /// card's number is the list's total.
+  static const List<String> toDoStates = [
+    'draft',
+    'confirmed',
+    'progress',
+    'to_close',
+  ];
 
-  static const String _cacheKeyData = 'manufacturing_data';
+  // The cache holds the list's default ("To Do") view. The keys changed
+  // with that default so a cache of the old unfiltered list isn't shown.
+  static const String _cacheKeyData = 'manufacturing_todo_data';
+  static const String _groupCacheKeyPrefix = 'manufacturing_todo_group_';
   static String _getGroupCacheKey(String groupBy) =>
-      'manufacturing_group_$groupBy';
+      '$_groupCacheKeyPrefix$groupBy';
 
   Future<List<ManufacturingTransfer>> loadCachedManufacturing() async {
     try {
@@ -23,8 +37,7 @@ class ManufacturingService {
             )
             .toList();
       }
-    } catch (e) {
-          }
+    } catch (e) {}
     return [];
   }
 
@@ -33,8 +46,7 @@ class ManufacturingService {
       final prefs = await SharedPreferences.getInstance();
       final data = items.map((p) => p.toJson()).toList();
       await prefs.setString(_cacheKeyData, jsonEncode(data));
-    } catch (e) {
-          }
+    } catch (e) {}
   }
 
   Future<Map<String, int>> loadCachedGroupSummary(String groupBy) async {
@@ -45,8 +57,7 @@ class ManufacturingService {
         final Map<String, dynamic> data = jsonDecode(cached);
         return data.map((key, value) => MapEntry(key, value as int));
       }
-    } catch (e) {
-          }
+    } catch (e) {}
     return {};
   }
 
@@ -57,8 +68,7 @@ class ManufacturingService {
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString(_getGroupCacheKey(groupBy), jsonEncode(summary));
-    } catch (e) {
-          }
+    } catch (e) {}
   }
 
   Future<void> clearCache() async {
@@ -68,12 +78,11 @@ class ManufacturingService {
 
       final keys = prefs.getKeys();
       for (final key in keys) {
-        if (key.startsWith('manufacturing_group_')) {
+        if (key.startsWith(_groupCacheKeyPrefix)) {
           await prefs.remove(key);
         }
       }
-    } catch (e) {
-          }
+    } catch (e) {}
   }
 
   Future<OdooClient?> _getClient() async {
@@ -84,7 +93,9 @@ class ManufacturingService {
     }
   }
 
-  List<dynamic> _buildDomain({
+  /// The `mrp.production` domain for the list filters. Shared by the list
+  /// below and the dashboard's counts.
+  static List<dynamic> buildDomain({
     String? searchQuery,
     List<String>? states,
     DateTime? startDate,
@@ -134,7 +145,7 @@ class ManufacturingService {
     final client = await _getClient();
     if (client == null) return [];
 
-    final domain = _buildDomain(
+    final domain = buildDomain(
       searchQuery: searchQuery,
       states: states,
       startDate: startDate,
@@ -142,7 +153,8 @@ class ManufacturingService {
     );
 
     try {
-            final result = await OdooSessionManager.callKwWithCompany({
+      final compat = await OdooCompat.current();
+      final result = await OdooSessionManager.callKwWithCompany({
         'model': 'mrp.production',
         'method': 'search_read',
         'args': [domain],
@@ -154,7 +166,7 @@ class ManufacturingService {
             'origin',
             'product_id',
             'product_qty',
-            'product_uom_id',
+            compat.mrpProductionUomField,
             'date_start',
             'date_finished',
             'create_date',
@@ -169,7 +181,7 @@ class ManufacturingService {
       final list = (result as List).cast<Map<String, dynamic>>();
       return list.map((e) => ManufacturingTransfer.fromJson(e)).toList();
     } catch (e) {
-            rethrow;
+      rethrow;
     }
   }
 
@@ -182,7 +194,7 @@ class ManufacturingService {
     final client = await _getClient();
     if (client == null) return 0;
 
-    final domain = _buildDomain(
+    final domain = buildDomain(
       searchQuery: searchQuery,
       states: states,
       startDate: startDate,
@@ -198,7 +210,7 @@ class ManufacturingService {
       });
       return result as int;
     } catch (e) {
-            rethrow;
+      rethrow;
     }
   }
 
@@ -212,7 +224,7 @@ class ManufacturingService {
     final client = await _getClient();
     if (client == null) return {};
 
-    final domain = _buildDomain(
+    final domain = buildDomain(
       searchQuery: searchQuery,
       states: states,
       startDate: startDate,
@@ -220,30 +232,21 @@ class ManufacturingService {
     );
 
     try {
-      final result = await OdooSessionManager.callKwWithCompany({
-        'model': 'mrp.production',
-        'method': 'read_group',
-        'args': [domain],
-        'kwargs': {
-          'fields': ['id'],
-          'groupby': [groupByField],
-          'lazy': false,
-        },
-      });
+      final result = await OdooReadGroup.counts(
+        model: 'mrp.production',
+        domain: domain,
+        groupBy: groupByField,
+      );
 
       final map = <String, int>{};
-      if (result is List) {
-        for (final group in result) {
-          if (group is Map) {
-            final key = _extractGroupKey(group, groupByField);
-            final count = (group['__count'] ?? 0) as int;
-            map[key] = count;
-          }
-        }
+      for (final group in result) {
+        final key = _extractGroupKey(group, groupByField);
+        final count = (group['__count'] ?? 0) as int;
+        map[key] = count;
       }
       return map;
     } catch (e) {
-            return {};
+      return {};
     }
   }
 

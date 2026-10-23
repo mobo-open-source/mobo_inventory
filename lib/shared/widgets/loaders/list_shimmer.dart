@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:shimmer/shimmer.dart';
+import '../../../core/theme/app_theme.dart';
 
 enum ShimmerType { standard, simple, product, search, settings, profile, form }
 
@@ -9,7 +10,6 @@ class ListShimmer {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final base = isDark ? Colors.grey[800]! : Colors.grey[300]!;
     final highlight = isDark ? Colors.grey[700]! : Colors.grey[100]!;
-    final cardBg = isDark ? Colors.grey[850]! : Colors.white;
 
     return Shimmer.fromColors(
       baseColor: base,
@@ -17,20 +17,7 @@ class ListShimmer {
       child: Container(
         margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         padding: const EdgeInsets.all(20),
-        decoration: BoxDecoration(
-          color: cardBg,
-          borderRadius: BorderRadius.circular(12),
-          boxShadow: [
-            BoxShadow(
-              color: isDark
-                  ? Colors.black.withOpacity(0.3)
-                  : Colors.black.withOpacity(0.05),
-              blurRadius: 4,
-              spreadRadius: 1,
-              offset: const Offset(0, 2),
-            ),
-          ],
-        ),
+        decoration: AppTheme.cardDecoration(isDark),
         child: Row(
           children: [
             Container(
@@ -52,7 +39,7 @@ class ListShimmer {
                     height: 18,
                     decoration: BoxDecoration(
                       color: base,
-                      borderRadius: BorderRadius.circular(4),
+                      borderRadius: BorderRadius.circular(6),
                     ),
                   ),
                   const SizedBox(height: 10),
@@ -110,7 +97,6 @@ class ListShimmer {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final base = isDark ? Colors.grey[800]! : Colors.grey[300]!;
     final highlight = isDark ? Colors.grey[700]! : Colors.grey[100]!;
-    final cardBg = isDark ? Colors.grey[850]! : Colors.white;
 
     return Shimmer.fromColors(
       baseColor: base,
@@ -118,10 +104,7 @@ class ListShimmer {
       child: Container(
         margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
         padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: cardBg,
-          borderRadius: BorderRadius.circular(12),
-        ),
+        decoration: AppTheme.cardDecoration(isDark),
         child: Row(
           children: [
             Expanded(
@@ -133,7 +116,7 @@ class ListShimmer {
                     height: 16,
                     decoration: BoxDecoration(
                       color: base,
-                      borderRadius: BorderRadius.circular(4),
+                      borderRadius: BorderRadius.circular(6),
                     ),
                   ),
                   const SizedBox(height: 8),
@@ -158,7 +141,6 @@ class ListShimmer {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final base = isDark ? Colors.grey[800]! : Colors.grey[300]!;
     final highlight = isDark ? Colors.grey[700]! : Colors.grey[100]!;
-    final cardBg = isDark ? Colors.grey[850]! : Colors.white;
 
     return Shimmer.fromColors(
       baseColor: base,
@@ -166,10 +148,7 @@ class ListShimmer {
       child: Container(
         margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         padding: const EdgeInsets.all(20),
-        decoration: BoxDecoration(
-          color: cardBg,
-          borderRadius: BorderRadius.circular(12),
-        ),
+        decoration: AppTheme.cardDecoration(isDark),
         child: Row(
           children: [
             Container(
@@ -190,7 +169,7 @@ class ListShimmer {
                     height: 18,
                     decoration: BoxDecoration(
                       color: base,
-                      borderRadius: BorderRadius.circular(4),
+                      borderRadius: BorderRadius.circular(6),
                     ),
                   ),
                   const SizedBox(height: 10),
@@ -302,7 +281,7 @@ class ListShimmer {
                       height: 18,
                       decoration: BoxDecoration(
                         color: base,
-                        borderRadius: BorderRadius.circular(4),
+                        borderRadius: BorderRadius.circular(6),
                       ),
                     ),
                     const Spacer(),

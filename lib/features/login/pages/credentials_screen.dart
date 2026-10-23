@@ -2,18 +2,23 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:hugeicons/hugeicons.dart';
+import 'package:loading_animation_widget/loading_animation_widget.dart';
 
 import 'package:provider/provider.dart';
-import '../../../shared/widgets/loaders/loading_widget.dart';
 import '../providers/login_provider.dart';
 import 'login_layout.dart';
+import '../../../core/models/appsession.dart';
 import '../../../core/services/session_service.dart';
 import '../../../core/services/odoo_session_manager.dart';
+import '../../../core/services/inventory_access_service.dart';
 import '../../../core/services/biometric_context_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/routing/app_routes.dart';
 import '../../../core/services/haptics_service.dart';
+import '../../../core/exceptions/odoo_error_mapper.dart';
+import '../../../core/utils/module_missing_dialog.dart';
+import '../../../shared/widgets/dialogs/access_denied_dialog.dart';
 import 'totp_page.dart';
 
 /// Screen for entering user credentials (Email/Password) for authentication.
@@ -74,6 +79,21 @@ class _CredentialsScreenState extends State<CredentialsScreen> {
     });
   }
 
+  /// Abandons the whole Add Account flow and returns to the configuration
+  /// screen it was launched from.
+  ///
+  /// That flow is Profile → server setup → this screen, so both of those are
+  /// popped: neither a server without the module nor an account this app
+  /// refuses can be completed from here. Guarded with canPop() so a
+  /// shallower-than-expected stack stops instead of popping past the root.
+  void _returnToConfiguration() {
+    if (!mounted) return;
+    final router = GoRouter.of(context);
+    for (var i = 0; i < 2 && router.canPop(); i++) {
+      router.pop();
+    }
+  }
+
   Future<void> _handleSubmit(LoginProvider provider) async {
     FocusScope.of(context).unfocus();
     setState(() {
@@ -114,6 +134,7 @@ class _CredentialsScreenState extends State<CredentialsScreen> {
                 username: provider.emailController.text.trim(),
                 password: provider.passwordController.text,
                 protocol: provider.selectedProtocol,
+                isAddingAccount: true,
               ),
             ),
           );
@@ -133,6 +154,37 @@ class _CredentialsScreenState extends State<CredentialsScreen> {
         if (mounted) {
           context.goNamed(AppRoutes.app);
         }
+      } else if (provider.databaseExpired) {
+        setState(() {
+          inlineError = null;
+          provider.errorMessage = null;
+        });
+        DatabaseExpiry.showExpiredDialog(
+          context,
+          onClose: _returnToConfiguration,
+        );
+      } else if (provider.moduleMissing) {
+        setState(() {
+          inlineError = null;
+          provider.errorMessage = null;
+        });
+        showModuleMissingDialog(
+          context,
+          actionLabel: 'OK',
+          onClose: _returnToConfiguration,
+        );
+      } else if (provider.accessDenied) {
+        final message =
+            provider.errorMessage ?? InventoryAccessService.portalUserMessage;
+        setState(() {
+          inlineError = null;
+          provider.errorMessage = null;
+        });
+        showAccessDeniedDialog(
+          context,
+          message: message,
+          onClose: _returnToConfiguration,
+        );
       } else {
         HapticsService.error();
         if (!mounted) return;
@@ -185,6 +237,17 @@ class _CredentialsScreenState extends State<CredentialsScreen> {
 
         TextInput.finishAutofillContext(shouldSave: true);
         context.goNamed(AppRoutes.app);
+      } else if (provider.databaseExpired) {
+        setState(() => inlineError = null);
+        DatabaseExpiry.showExpiredDialog(context);
+      } else if (provider.moduleMissing) {
+        setState(() => inlineError = null);
+        showModuleMissingDialog(context);
+      } else if (provider.accessDenied) {
+        final message =
+            provider.errorMessage ?? InventoryAccessService.portalUserMessage;
+        setState(() => inlineError = null);
+        showAccessDeniedDialog(context, message: message);
       }
     }
   }
@@ -200,6 +263,9 @@ class _CredentialsScreenState extends State<CredentialsScreen> {
   Future<bool> _addNewAccount(LoginProvider provider) async {
     try {
       provider.setLoading(true);
+      provider.moduleMissing = false;
+      provider.accessDenied = false;
+      provider.databaseExpired = false;
       final biometricContext = BiometricContextService();
       biometricContext.startAccountOperation('add_account');
 
@@ -222,14 +288,27 @@ class _CredentialsScreenState extends State<CredentialsScreen> {
         return false;
       }
 
-      final newSession = await OdooSessionManager.authenticate(
-        serverUrl: serverUrl,
-        database: database,
-        username: provider.emailController.text.trim(),
-        password: provider.passwordController.text,
-      );
+      // Nothing this account touches is written to the device until it has
+      // passed every check below — an account this app refuses must not be
+      // left saved anywhere, and the probes themselves would otherwise
+      // persist it on their way through the session manager.
+      OdooSessionManager.beginProvisionalSession();
+
+      final AppSessionData? newSession;
+      try {
+        newSession = await OdooSessionManager.authenticate(
+          serverUrl: serverUrl,
+          database: database,
+          username: provider.emailController.text.trim(),
+          password: provider.passwordController.text,
+        );
+      } catch (_) {
+        await OdooSessionManager.discardProvisionalSession(current);
+        rethrow;
+      }
 
       if (newSession == null) {
+        await OdooSessionManager.discardProvisionalSession(current);
         provider.errorMessage =
             'Authentication failed. Please check your credentials.';
         biometricContext.endAccountOperation('add_account');
@@ -237,11 +316,68 @@ class _CredentialsScreenState extends State<CredentialsScreen> {
         return false;
       }
 
+      // An expired database is refused before anything else: none of it is
+      // usable, whatever modules or access rights it has.
+      if (await DatabaseExpiry.isCurrentSessionExpired()) {
+        await OdooSessionManager.discardProvisionalSession(current);
+        provider.databaseExpired = true;
+        biometricContext.endAccountOperation('add_account');
+        provider.setLoading(false);
+        return false;
+      }
+
+      // Module is checked first: a server missing Inventory is always
+      // reported as that, rather than blamed on the user's own access
+      // rights. Portal access is only checked once the module is confirmed
+      // present.
+      final accessService = InventoryAccessService();
+      final inventoryInstalled = await accessService
+          .isInventoryModuleInstalled();
+      if (!inventoryInstalled) {
+        await OdooSessionManager.discardProvisionalSession(current);
+        provider.moduleMissing = true;
+        biometricContext.endAccountOperation('add_account');
+        provider.setLoading(false);
+        return false;
+      }
+
+      final isPortal = await accessService.isPortalUser();
+      if (isPortal) {
+        await OdooSessionManager.discardProvisionalSession(current);
+        provider.accessDenied = true;
+        provider.errorMessage = InventoryAccessService.portalUserMessage;
+        biometricContext.endAccountOperation('add_account');
+        provider.setLoading(false);
+        return false;
+      }
+
+      // Cleared every check — this account may now be written to the device.
+      await OdooSessionManager.commitProvisionalSession();
+
+      // Pin the new account's own company scope before it is stored or made
+      // current. `authenticate` leaves the company fields empty, so without
+      // this the account's RPCs would be scoped by whatever company context
+      // the previously active account left behind — a company it may not
+      // even belong to.
+      await OdooSessionManager.getClientEnsured();
+      await OdooSessionManager.getAllowedCompaniesList();
+
+      final fixedSession = newSession.copyWith(
+        selectedCompanyId: newSession.companyId,
+        allowedCompanyIds: newSession.allowedCompanyIds,
+      );
+      await fixedSession.saveToPrefs();
+      await OdooSessionManager.updateSession(fixedSession);
+      sessionService.updateSession(fixedSession);
+
       await sessionService.storeAccount(
-        newSession,
+        fixedSession,
         provider.passwordController.text,
         markAsCurrent: true,
       );
+
+      // The previous account's data is cleared by AccountChangeListener as
+      // soon as this account becomes current.
 
       try {
         final prefs = await SharedPreferences.getInstance();
@@ -258,7 +394,7 @@ class _CredentialsScreenState extends State<CredentialsScreen> {
         await prefs.setString('server_db_$serverUrl', database);
       } catch (_) {}
 
-      await sessionService.switchToAccount(newSession);
+      await sessionService.switchToAccount(fixedSession);
 
       if (mounted) {
         context.goNamed(AppRoutes.app);
@@ -268,6 +404,12 @@ class _CredentialsScreenState extends State<CredentialsScreen> {
       provider.setLoading(false);
       return true;
     } catch (e) {
+      // Covers any way out that isn't a completed add — including the 2FA
+      // hand-off rethrown below, where the OTP screen starts the account
+      // over. A no-op once the account was committed above.
+      await OdooSessionManager.discardProvisionalSession(
+        SessionService.instance.currentSession,
+      );
       provider.setLoading(false);
       final msg = e.toString().toLowerCase();
       if (msg.contains('two-factor') ||
@@ -278,7 +420,8 @@ class _CredentialsScreenState extends State<CredentialsScreen> {
           (msg.contains('null') && msg.contains('subtype'))) {
         rethrow;
       }
-      provider.errorMessage = 'Failed to add account: ${e.toString()}';
+      provider.errorMessage =
+          'Failed to add account: ${OdooErrorMapper.toUserMessage(e)}';
       final biometricContext = BiometricContextService();
       biometricContext.endAccountOperation('add_account');
       return false;
@@ -311,7 +454,7 @@ class _CredentialsScreenState extends State<CredentialsScreen> {
           return LoginLayout(
             title: widget.isAddingAccount ? 'Add Account' : 'Sign In',
             subtitle: widget.isAddingAccount
-                ? 'Enter credentials for the new account'
+                ? 'Enter your credentials'
                 : 'Enter your credentials to continue',
             backButton: Positioned(
               top: 24,
@@ -325,8 +468,8 @@ class _CredentialsScreenState extends State<CredentialsScreen> {
                     height: 64,
                     width: 64,
                     alignment: Alignment.center,
-                    child: const Icon(
-                      HugeIcons.strokeRoundedArrowLeft01,
+                    child: const HugeIcon(
+                      icon: HugeIcons.strokeRoundedArrowLeft01,
                       color: Colors.white,
                       size: 24,
                     ),
@@ -346,7 +489,9 @@ class _CredentialsScreenState extends State<CredentialsScreen> {
                         AutofillHints.email,
                       ],
                       controller: provider.emailController,
-                      hint: 'Email',
+                      hint: widget.isAddingAccount
+                          ? 'Email / Username'
+                          : 'Email',
                       prefixIcon: HugeIcons.strokeRoundedMail01,
                       keyboardType: TextInputType.emailAddress,
                       enabled: !provider.disableFields,
@@ -405,12 +550,14 @@ class _CredentialsScreenState extends State<CredentialsScreen> {
                         return null;
                       },
                       suffixIcon: IconButton(
-                        icon: Icon(
-                          provider.obscurePassword
-                              ? Icons.visibility_off_outlined
-                              : Icons.visibility_outlined,
-                          color: Colors.black54,
-                          size: 20,
+                        icon: Transform.scale(
+                          scale: 20 / 24.0,
+                          child: HugeIcon(
+                            icon: provider.obscurePassword
+                                ? HugeIcons.strokeRoundedViewOff
+                                : HugeIcons.strokeRoundedView,
+                            color: Colors.black54,
+                          ),
                         ),
                         onPressed: provider.togglePasswordVisibility,
                       ),
@@ -431,37 +578,42 @@ class _CredentialsScreenState extends State<CredentialsScreen> {
                     ),
                     const SizedBox(height: 8),
 
-                    Align(
-                      alignment: Alignment.centerRight,
-                      child: TextButton(
-                        onPressed: () {
-                          context.pushNamed(
-                            AppRoutes.resetPassword,
-                            extra: {
-                              'url': widget.url,
-                              'database': widget.database,
-                            },
-                          );
-                        },
-                        style: TextButton.styleFrom(
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 8,
-                            vertical: 4,
+                    if (!widget.isAddingAccount)
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: TextButton(
+                          onPressed: provider.isLoading
+                              ? null
+                              : () {
+                                  context.pushNamed(
+                                    AppRoutes.resetPassword,
+                                    extra: {
+                                      'url': provider.getFullUrl(),
+                                      'database': provider.database,
+                                    },
+                                  );
+                                },
+                          style: TextButton.styleFrom(
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 4,
+                            ),
+                            minimumSize: Size.zero,
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                           ),
-                          minimumSize: Size.zero,
-                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                        ),
-                        child: Text(
-                          'Forgot Password?',
-                          style: GoogleFonts.manrope(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w500,
-                            color: Colors.white70,
+                          child: Text(
+                            'Forgot Password?',
+                            style: GoogleFonts.manrope(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w500,
+                              color: provider.isLoading
+                                  ? Colors.white54
+                                  : Colors.white70,
+                            ),
                           ),
                         ),
                       ),
-                    ),
                     const SizedBox(height: 8),
 
                     LoginErrorDisplay(error: inlineError),
@@ -481,11 +633,10 @@ class _CredentialsScreenState extends State<CredentialsScreen> {
                               fontWeight: FontWeight.w600,
                             ),
                           ),
-                          SizedBox(width: 12),
-                          LoadingWidget(
+                          const SizedBox(width: 12),
+                          LoadingAnimationWidget.staggeredDotsWave(
                             color: Colors.white,
                             size: 28,
-                            variant: LoadingVariant.staggeredDots,
                           ),
                         ],
                       ),

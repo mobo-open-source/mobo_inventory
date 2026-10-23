@@ -13,19 +13,28 @@ import 'features/replenishment/providers/replenishment_provider.dart';
 import 'core/theme/theme_provider.dart';
 import 'core/theme/app_theme.dart';
 import 'core/services/session_service.dart';
+import 'core/services/access_rights_service.dart';
+import 'core/services/session_expiry_handler.dart';
 import 'shared/widgets/connectivity_listener_widget.dart';
 import 'core/routing/app_router.dart';
+import 'app/account_change_listener.dart';
 
-final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
+/// Shared handle on the root navigator so services with no BuildContext of
+/// their own (e.g. ReviewService) can still reach one.
+final GlobalKey<NavigatorState> navigatorKey = AppRouter.rootNavigatorKey;
 final GlobalKey<ScaffoldMessengerState> scaffoldMessengerKey =
     GlobalKey<ScaffoldMessengerState>();
-final RouteObserver<ModalRoute<void>> routeObserver =
+  final RouteObserver<ModalRoute<void>> routeObserver =
     RouteObserver<ModalRoute<void>>();
 
 void main() {
+  SessionExpiryHandler.init();
   runApp(
     MultiProvider(
       providers: [
+        ChangeNotifierProvider<AccessRightsService>.value(
+          value: AccessRightsService.instance,
+        ),
         ChangeNotifierProvider(create: (_) => InventoryProductProvider()),
         ChangeNotifierProvider(create: (_) => DashboardProvider()),
         ChangeNotifierProvider(create: (_) => SettingsProvider()),
@@ -37,10 +46,10 @@ void main() {
         ChangeNotifierProvider(create: (_) => CompanyProvider()..initialize()),
         ChangeNotifierProvider(create: (_) => ReplenishmentProvider()),
         ChangeNotifierProvider(create: (_) => LastOpenedProvider()),
-
         ChangeNotifierProvider<SessionService>.value(
           value: SessionService.instance,
-        ),
+        )
+
       ],
       child: const MyApp(),
     ),
@@ -53,20 +62,22 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Consumer<ThemeProvider>(
-      builder: (context, themeProvider, child) {
-        return ConnectivityListenerWidget(
-          child: MaterialApp.router(
-            scaffoldMessengerKey: scaffoldMessengerKey,
-            debugShowCheckedModeBanner: false,
-            title: 'Mobo Inv App',
-            theme: AppTheme.lightTheme,
-            darkTheme: AppTheme.darkTheme,
-            themeMode: themeProvider.themeMode,
-            routerConfig: AppRouter.build(),
-          ),
-        );
-      },
+    return AccountChangeListener(
+      child: Consumer<ThemeProvider>(
+        builder: (context, themeProvider, child) {
+          return ConnectivityListenerWidget(
+            child: MaterialApp.router(
+              scaffoldMessengerKey: scaffoldMessengerKey,
+              debugShowCheckedModeBanner: false,
+              title: 'Mobo Inv App',
+              theme: AppTheme.lightTheme,
+              darkTheme: AppTheme.darkTheme,
+              themeMode: themeProvider.themeMode,
+              routerConfig: AppRouter.build(),
+            ),
+          );
+        },
+      ),
     );
   }
 }

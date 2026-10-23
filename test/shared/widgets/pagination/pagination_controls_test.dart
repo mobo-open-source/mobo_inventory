@@ -1,68 +1,92 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:hugeicons/hugeicons.dart';
 import 'package:mobo_inv_app/shared/widgets/pagination/pagination_controls.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  testWidgets('PaginationControls shows text and triggers callbacks when enabled', (tester) async {
-    int previous = 0;
-    int next = 0;
-
-    await tester.pumpWidget(MaterialApp(
+  Widget controls({
+    required bool canGoToPreviousPage,
+    required bool canGoToNextPage,
+    required String paginationText,
+    VoidCallback? onPreviousPage,
+    VoidCallback? onNextPage,
+  }) {
+    return MaterialApp(
       home: Scaffold(
         body: Center(
           child: PaginationControls(
-            canGoToPreviousPage: true,
-            canGoToNextPage: true,
-            onPreviousPage: () => previous++,
-            onNextPage: () => next++,
-            paginationText: '1-20 of 200',
+            canGoToPreviousPage: canGoToPreviousPage,
+            canGoToNextPage: canGoToNextPage,
+            onPreviousPage: onPreviousPage ?? () {},
+            onNextPage: onNextPage ?? () {},
+            paginationText: paginationText,
             isDark: false,
             theme: ThemeData.light(),
           ),
         ),
       ),
-    ));
+    );
+  }
 
-    expect(find.text('1-20 of 200'), findsOneWidget);
+  testWidgets('PaginationControls shows text and triggers callbacks when enabled', (tester) async {
+    int previous = 0;
+    int next = 0;
 
-    // Tap chevron left (previous)
-    await tester.tap(find.byIcon(Icons.chevron_left));
+    await tester.pumpWidget(
+      controls(
+        canGoToPreviousPage: true,
+        canGoToNextPage: true,
+        onPreviousPage: () => previous++,
+        onNextPage: () => next++,
+        paginationText: '21-40/200',
+      ),
+    );
+
+    expect(find.text('21-40/200'), findsOneWidget);
+
+    await tester.tap(find.byIcon(HugeIcons.strokeRoundedArrowLeft01));
     await tester.pump();
-    // Tap chevron right (next)
-    await tester.tap(find.byIcon(Icons.chevron_right));
+    await tester.tap(find.byIcon(HugeIcons.strokeRoundedArrowRight01));
     await tester.pump();
 
     expect(previous, 1);
     expect(next, 1);
   });
 
-  testWidgets('PaginationControls disables taps when not allowed', (tester) async {
+  testWidgets('PaginationControls disables the arrow with no page to go to', (tester) async {
     int previous = 0;
     int next = 0;
 
-    await tester.pumpWidget(MaterialApp(
-      home: Scaffold(
-        body: Center(
-          child: PaginationControls(
-            canGoToPreviousPage: false,
-            canGoToNextPage: false,
-            onPreviousPage: () => previous++,
-            onNextPage: () => next++,
-            paginationText: '0-0 of 0',
-            isDark: false,
-            theme: ThemeData.light(),
-          ),
-        ),
+    await tester.pumpWidget(
+      controls(
+        canGoToPreviousPage: false,
+        canGoToNextPage: true,
+        onPreviousPage: () => previous++,
+        onNextPage: () => next++,
+        paginationText: '1-20/200',
       ),
-    ));
+    );
 
-    // Tapping should have no effect (onTap is null)
-    await tester.tap(find.byIcon(Icons.chevron_left));
-    await tester.tap(find.byIcon(Icons.chevron_right));
+    await tester.tap(find.byIcon(HugeIcons.strokeRoundedArrowLeft01));
+    await tester.pump();
 
     expect(previous, 0);
     expect(next, 0);
+  });
+
+  testWidgets('PaginationControls keeps the record count on a single page', (tester) async {
+    await tester.pumpWidget(
+      controls(
+        canGoToPreviousPage: false,
+        canGoToNextPage: false,
+        paginationText: '1-5/5',
+      ),
+    );
+
+    expect(find.text('1-5/5'), findsOneWidget);
+    expect(find.byIcon(HugeIcons.strokeRoundedArrowLeft01), findsNothing);
+    expect(find.byIcon(HugeIcons.strokeRoundedArrowRight01), findsNothing);
   });
 }

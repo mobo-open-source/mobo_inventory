@@ -7,14 +7,13 @@ plugins {
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
 }
+val keystoreProperties = Properties()
+val keystorePropertiesFile = rootProject.file("key.properties")
+if (keystorePropertiesFile.exists()) {
+    keystoreProperties.load(FileInputStream(keystorePropertiesFile))
+}
 
 android {
-    val keystoreProperties = Properties().apply {
-        val keystorePropertiesFile = rootProject.projectDir.resolve("key.properties")
-        if (keystorePropertiesFile.exists()) {
-            load(FileInputStream(keystorePropertiesFile))
-        }
-    }
 
     namespace = "com.cybrosys.mobo_inventory"
     compileSdk = flutter.compileSdkVersion
@@ -49,17 +48,27 @@ android {
         }
     }
 
+    // Only configure release signing when android/key.properties provides a
+    // storeFile; without this guard a missing key.properties breaks every
+    // build, debug included.
+    val releaseStoreFile = keystoreProperties.getProperty("storeFile")
+
     signingConfigs {
-        create("release") {
-            keyAlias = keystoreProperties.getProperty("keyAlias")
-            keyPassword = keystoreProperties.getProperty("keyPassword")
-            storeFile = keystoreProperties.getProperty("storeFile")?.let { project.file(it) }
-            storePassword = keystoreProperties.getProperty("storePassword")
+        if (releaseStoreFile != null) {
+            create("release") {
+                keyAlias = keystoreProperties.getProperty("keyAlias")
+                keyPassword = keystoreProperties.getProperty("keyPassword")
+                storeFile = file(releaseStoreFile)
+                storePassword = keystoreProperties.getProperty("storePassword")
+            }
         }
     }
     buildTypes {
         release {
-            signingConfig = signingConfigs.getByName("release")
+            // Release builds are signed only with the real upload key; without
+            // android/key.properties they are left unsigned rather than
+            // silently falling back to the debug key.
+            signingConfigs.findByName("release")?.let { signingConfig = it }
         }
     }
 }

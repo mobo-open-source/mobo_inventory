@@ -1,10 +1,14 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:hugeicons/hugeicons.dart';
 import 'package:provider/provider.dart';
 import 'package:go_router/go_router.dart';
 import '../providers/login_provider.dart';
 import '../../../core/routing/app_routes.dart';
+import '../../../core/services/inventory_access_service.dart';
+import '../../../core/theme/app_theme.dart';
+import '../../../shared/widgets/snackbars/custom_snackbar.dart';
 import 'login_layout.dart';
 
 /// Initial screen for configuring the Odoo server URL and selecting a database.
@@ -53,6 +57,18 @@ class _ServerSetupScreenState extends State<ServerSetupScreen>
     _databaseFadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
       CurvedAnimation(parent: _databaseFadeController, curve: Curves.easeInOut),
     );
+
+    // Set by AppEntry when an already-logged-in session fails the
+    // module/access check on launch and gets signed out — surfaced here,
+    // once, instead of as a dialog that would otherwise reappear on every
+    // subsequent app start.
+    final signOutMessage =
+        InventoryAccessService.consumePendingSignOutMessage();
+    if (signOutMessage != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) CustomSnackbar.showError(context, signOutMessage);
+      });
+    }
   }
 
   @override
@@ -128,8 +144,31 @@ class _ServerSetupScreenState extends State<ServerSetupScreen>
               FocusScope.of(context).unfocus();
             },
             child: LoginLayout(
-              title: 'Sign In',
+              title: widget.isAddingAccount ? 'Add Account' : 'Sign In',
               subtitle: 'Configure your server connection',
+              backButton: widget.isAddingAccount
+                  ? Positioned(
+                      top: 24,
+                      left: 0,
+                      child: Material(
+                        color: Colors.transparent,
+                        child: InkWell(
+                          onTap: () => Navigator.of(context).pop(),
+                          borderRadius: BorderRadius.circular(32),
+                          child: Container(
+                            height: 64,
+                            width: 64,
+                            alignment: Alignment.center,
+                            child: const HugeIcon(
+                              icon: HugeIcons.strokeRoundedArrowLeft01,
+                              color: Colors.white,
+                              size: 24,
+                            ),
+                          ),
+                        ),
+                      ),
+                    )
+                  : null,
               child: Form(
                 key: provider.formKey,
                 child: Column(
@@ -171,8 +210,10 @@ class _ServerSetupScreenState extends State<ServerSetupScreen>
                       },
                       child: LoginUrlTextField(
                         controller: provider.urlController,
-                        hint: 'Enter Server Address',
-                        prefixIcon: Icons.dns,
+                        hint: widget.isAddingAccount
+                            ? 'Server Address'
+                            : 'Enter Server Address',
+                        prefixIcon: HugeIcons.strokeRoundedServerStack01,
                         enabled: !provider.disableFields,
                         hasError: urlHasError,
                         selectedProtocol: provider.selectedProtocol,
@@ -333,10 +374,56 @@ class _ServerSetupScreenState extends State<ServerSetupScreen>
                       },
                     ),
 
+                    // The server keeps its database list private and none could
+                    // be detected: the name is typed instead of picked.
+                    if (provider.manualDbEntryRequired) ...[
+                      LoginTextField(
+                        controller: provider.dbController,
+                        hint: 'Database Name',
+                        prefixIcon: HugeIcons.strokeRoundedDatabase,
+                        enabled: !provider.isLoadingDatabases,
+                        hasError: dbHasError,
+                        onChanged: (value) {
+                          provider.setDatabase(value.trim());
+                          setState(() {
+                            dbHasError = value.trim().isEmpty;
+                            inlineError = null;
+                          });
+                        },
+                        validator: (value) {
+                          if (!_shouldValidate) return null;
+                          if (value == null || value.trim().isEmpty) {
+                            return 'Database name is required';
+                          }
+                          return null;
+                        },
+                        autovalidateMode: _shouldValidate
+                            ? AutovalidateMode.onUserInteraction
+                            : AutovalidateMode.disabled,
+                      ),
+                      const SizedBox(height: 16),
+                    ],
+
+                    if (provider.dbInfoMessage != null) ...[
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 8.0),
+                        child: Text(
+                          provider.dbInfoMessage!,
+                          style: const TextStyle(
+                            color: Colors.white70,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w400,
+                          ),
+                        ),
+                      ),
+                    ],
+
                     LoginErrorDisplay(error: inlineError),
 
                     LoginButton(
                       text: 'Next',
+                      isLoading: provider.isLoadingDatabases,
+                      isEnabled: _canProceedToCredentials(provider),
                       onPressed: _canProceedToCredentials(provider)
                           ? () => _goToCredentials(provider)
                           : null,
@@ -529,7 +616,7 @@ class _CustomAutocompleteFieldState extends State<_CustomAutocompleteField> {
         renderBox?.size.width ?? (MediaQuery.of(context).size.width - 48);
 
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final backgroundColor = isDark ? const Color(0xFF2D2D2D) : Colors.white;
+    final backgroundColor = isDark ? AppTheme.darkPopupSurface : Colors.white;
     final textColor = isDark ? Colors.white : Colors.black87;
     final hoverColor = isDark
         ? Colors.white.withOpacity(0.1)
@@ -543,13 +630,13 @@ class _CustomAutocompleteFieldState extends State<_CustomAutocompleteField> {
           showWhenUnlinked: false,
           offset: const Offset(0, 60),
           child: Material(
-            elevation: 12.0,
+            elevation: 4,
             color: backgroundColor,
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(16),
             shadowColor: Colors.black.withOpacity(0.2),
             child: Container(
               decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(12),
+                borderRadius: BorderRadius.circular(16),
                 border: Border.all(
                   color: isDark
                       ? Colors.white.withOpacity(0.1)

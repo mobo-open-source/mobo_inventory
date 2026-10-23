@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:loading_animation_widget/loading_animation_widget.dart';
+import '../../../core/theme/app_theme.dart';
 
 /// A highly configurable loading widget that can be used as a standalone spinner or a full-screen overlay.
 class LoadingWidget extends StatelessWidget {
@@ -51,10 +52,11 @@ class LoadingWidget extends StatelessWidget {
 
         Center(
           child: Card(
-            color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
-            elevation: 8,
+            color: isDark ? AppTheme.darkSurface : Colors.white,
+            elevation: 0,
+            shadowColor: Colors.transparent,
             shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(14),
+              borderRadius: BorderRadius.circular(16),
             ),
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 22),

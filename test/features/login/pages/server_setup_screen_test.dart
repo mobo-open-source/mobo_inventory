@@ -50,6 +50,11 @@ void main() {
     when(() => mockLoginProvider.urlCheck).thenReturn(false);
     when(() => mockLoginProvider.dropdownItems).thenReturn([]);
     when(() => mockLoginProvider.errorMessage).thenReturn(null);
+    when(() => mockLoginProvider.manualDbEntryRequired).thenReturn(false);
+    when(() => mockLoginProvider.dbInfoMessage).thenReturn(null);
+    when(
+      () => mockLoginProvider.dbController,
+    ).thenReturn(TextEditingController());
     when(() => mockLoginProvider.disableFields).thenReturn(false);
     when(() => mockLoginProvider.selectedProtocol).thenReturn('https://');
     when(() => mockLoginProvider.formKey).thenReturn(GlobalKey<FormState>());

@@ -5,11 +5,13 @@ import 'package:provider/provider.dart';
 import '../shared/widgets/loaders/loading_indicator.dart';
 import '../features/login/pages/server_setup_screen.dart';
 import '../features/login/pages/app_lock_screen.dart';
+import '../features/login/pages/login_layout.dart' show DatabaseExpiry;
 import '../core/services/session_service.dart';
 import '../core/services/odoo_session_manager.dart';
 import '../core/services/biometric_context_service.dart';
 import '../core/services/connectivity_service.dart';
-import '../features/inventory/pages/missing_inventory_screen.dart';
+import '../core/services/inventory_access_service.dart';
+import '../core/utils/module_missing_dialog.dart';
 import '../core/routing/app_routes.dart';
 
 class AppEntry extends StatefulWidget {
@@ -23,6 +25,7 @@ class AppEntry extends StatefulWidget {
 
 class _AppEntryState extends State<AppEntry> {
   Future<Map<String, dynamic>>? _postLoginFuture;
+  bool _moduleDialogShown = false;
 
   @override
   void initState() {
@@ -41,31 +44,42 @@ class _AppEntryState extends State<AppEntry> {
     final biometricEnabled = prefs.getBool('biometric_enabled') ?? false;
 
     bool sessionValid = await OdooSessionManager.isSessionValid();
+    bool moduleMissingOnResume = false;
 
-    bool inventoryInstalled = prefs.getBool('inventory_installed') ?? false;
+    // A session signed in before its database expired is dropped on the
+    // next launch, the same way as a failed module/access check below. Fails
+    // open on RPC errors, so being offline never signs anyone out.
+    if (sessionValid && await DatabaseExpiry.isCurrentSessionExpired()) {
+      await OdooSessionManager.logout();
+      sessionValid = false;
+      InventoryAccessService.setPendingSignOutMessage(DatabaseExpiry.message);
+    }
 
     if (sessionValid) {
-      try {
-        final count = await OdooSessionManager.safeCallKwWithoutCompany({
-          'model': 'ir.module.module',
-          'method': 'search_count',
-          'args': [
-            [
-              ['name', '=', 'stock'],
-              ['state', '=', 'installed'],
-            ],
-          ],
-          'kwargs': {},
-        });
-        final isInstalled = (count is int) ? count > 0 : (count as num) > 0;
+      // Re-validated on every launch, not only at login time: an admin may
+      // have uninstalled Inventory or turned this user into a portal user
+      // while the session was still active on the device. Both checks fail
+      // open on RPC errors, so being offline never signs anyone out.
+      final accessService = InventoryAccessService();
+      final inventoryInstalled = await accessService
+          .isInventoryModuleInstalled();
+      final isPortalUser = inventoryInstalled
+          ? await accessService.isPortalUser()
+          : false;
 
-        if (isInstalled != inventoryInstalled) {
-          inventoryInstalled = isInstalled;
-          await prefs.setBool('inventory_installed', isInstalled);
-        }
-      } catch (e) {
+      if (!inventoryInstalled || isPortalUser) {
+        // Undone right here rather than left for a dialog button to do
+        // later — otherwise `isLoggedIn` stays true in prefs and every
+        // subsequent app start re-hits the same failure forever. Only the
+        // active session is dropped; the saved account list is kept.
+        await OdooSessionManager.logout();
+        sessionValid = false;
         if (!inventoryInstalled) {
-          inventoryInstalled = true;
+          moduleMissingOnResume = true;
+        } else {
+          InventoryAccessService.setPendingSignOutMessage(
+            InventoryAccessService.portalUserMessage,
+          );
         }
       }
     }
@@ -73,8 +87,8 @@ class _AppEntryState extends State<AppEntry> {
     return {
       'sessionValid': sessionValid,
       'biometricEnabled': biometricEnabled,
-      'inventoryInstalled': inventoryInstalled,
       'hasSeenGetStarted': hasSeenGetStarted,
+      'moduleMissingOnResume': moduleMissingOnResume,
     };
   }
 
@@ -102,8 +116,22 @@ class _AppEntryState extends State<AppEntry> {
         final hasSeenGetStarted = snapshot.data!['hasSeenGetStarted'] as bool;
         final sessionValid = snapshot.data!['sessionValid'] as bool;
         final biometricEnabled = snapshot.data!['biometricEnabled'] as bool;
-        final inventoryInstalled =
-            snapshot.data!['inventoryInstalled'] as bool? ?? false;
+        final moduleMissingOnResume =
+            snapshot.data!['moduleMissingOnResume'] as bool? ?? false;
+
+        // The account was already signed out in `_checkInitialStatus` — this
+        // dialog is only a notification, so its button just closes it.
+        // Checked before the no-session branch below, which would otherwise
+        // return the login screen without ever saying why.
+        if (moduleMissingOnResume) {
+          if (!_moduleDialogShown) {
+            _moduleDialogShown = true;
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted) showModuleMissingDialog(context, actionLabel: 'OK');
+            });
+          }
+          return const PopScope(canPop: false, child: ServerSetupScreen());
+        }
 
         if (!hasSeenGetStarted) {
           WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -136,19 +164,6 @@ class _AppEntryState extends State<AppEntry> {
             ),
           );
         } else {
-          if (!inventoryInstalled) {
-            return PopScope(
-              canPop: false,
-              child: MissingInventoryScreen(
-                onRetry: () {
-                  setState(() {
-                    _postLoginFuture = null;
-                  });
-                },
-              ),
-            );
-          }
-
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (context.mounted) {
               context.goNamed(AppRoutes.dashboard);

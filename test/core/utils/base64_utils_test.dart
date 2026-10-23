@@ -17,4 +17,30 @@ void main() {
       expect(() => decodeBase64ToBytes(invalid), throwsA(isA<FormatException>()));
     });
   });
+
+  group('odooBinaryToBase64', () {
+    test('returns a base64 string as is (Odoo 17–19)', () {
+      expect(odooBinaryToBase64('aGVsbG8='), 'aGVsbG8=');
+    });
+
+    test('returns content from the Odoo 20 map', () {
+      expect(
+        odooBinaryToBase64({
+          'content': 'aGVsbG8=',
+          'size': 5,
+          'filename': 'me.png',
+        }),
+        'aGVsbG8=',
+      );
+      expect(odooBinaryToBase64({'content': 'aGVsbG8=', 'size': 5}), 'aGVsbG8=');
+    });
+
+    test('returns empty string for false, null or anything else', () {
+      expect(odooBinaryToBase64(false), '');
+      expect(odooBinaryToBase64(null), '');
+      expect(odooBinaryToBase64(123), '');
+      expect(odooBinaryToBase64({'size': 5}), '');
+      expect(odooBinaryToBase64({'content': false}), '');
+    });
+  });
 }

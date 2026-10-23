@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import '../models/transfer_model.dart';
 import '../../../core/routing/app_routes.dart';
+import '../../../core/theme/app_theme.dart';
 import 'transfer_list_tile.dart';
 
 class TransferGroupTile extends StatefulWidget {
@@ -29,12 +30,28 @@ class _TransferGroupTileState extends State<TransferGroupTile> {
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      margin: const EdgeInsets.only(bottom: 12),
+    // §12 grouped section header shell.
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      decoration: BoxDecoration(
+        // grey[900] in dark so the grey[850] cards nested in the group stay
+        // visible.
+        color: widget.isDark ? Colors.grey[900] : Colors.white,
+        borderRadius: BorderRadius.circular(AppRadius.lg),
+        border: Border.all(
+          color: widget.isDark
+              ? Colors.white.withValues(alpha: 0.08)
+              : Colors.black.withValues(alpha: 0.06),
+        ),
+        boxShadow: AppShadows.card,
+      ),
       child: Column(
         children: [
           InkWell(
             onTap: () => setState(() => _isExpanded = !_isExpanded),
+            borderRadius: BorderRadius.circular(AppRadius.md),
+            splashColor: Colors.transparent,
+            highlightColor: Colors.transparent,
             child: Padding(
               padding: const EdgeInsets.all(16),
               child: Row(
@@ -42,32 +59,24 @@ class _TransferGroupTileState extends State<TransferGroupTile> {
                   Expanded(
                     child: Text(
                       widget.groupKey,
-                      style: widget.theme.textTheme.titleMedium?.copyWith(
+                      style: TextStyle(
+                        color: widget.isDark ? Colors.white : Colors.black,
                         fontWeight: FontWeight.w600,
+                        fontSize: 14,
                       ),
                     ),
                   ),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 4,
-                    ),
-                    decoration: BoxDecoration(
-                      color: widget.theme.primaryColor.withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Text(
-                      '${widget.count}',
-                      style: widget.theme.textTheme.bodySmall?.copyWith(
-                        color: widget.theme.primaryColor,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
+                  StatusColors.buildStatusBadge(
+                    '${widget.count}',
+                    widget.theme.primaryColor,
+                    isDark: widget.isDark,
                   ),
                   const SizedBox(width: 8),
                   Icon(
-                    _isExpanded ? Icons.expand_less : Icons.expand_more,
-                    color: widget.theme.iconTheme.color,
+                    _isExpanded
+                        ? Icons.keyboard_arrow_up
+                        : Icons.keyboard_arrow_down,
+                    color: widget.isDark ? Colors.white70 : Colors.black87,
                   ),
                 ],
               ),

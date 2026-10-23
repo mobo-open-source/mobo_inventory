@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../../core/exceptions/odoo_error_mapper.dart';
+import '../../../core/odoo/odoo_compat.dart';
 import '../../../core/services/odoo_session_manager.dart';
 import '../../../core/services/odoo_metadata_service.dart';
 import '../models/transfer_model.dart';
@@ -17,6 +18,13 @@ class TransferProvider extends ChangeNotifier {
   final int _pageSize = 20;
   bool _hasLoadedOnce = false;
 
+  /// Counts the list fetches (a search, a page) and the group-summary fetches
+  /// started. A fetch that is no longer the latest when its answer arrives —
+  /// a slow search overtaken by the next one — is dropped, so it cannot
+  /// overwrite what the newer one loaded.
+  int _listSeq = 0;
+  int _groupSeq = 0;
+
   String _searchQuery = '';
   List<String> _selectedStates = [];
   DateTime? _startDate;
@@ -25,6 +33,8 @@ class TransferProvider extends ChangeNotifier {
 
   Map<String, int> _groupSummary = {};
   final Map<String, List<InternalTransfer>> _loadedGroups = {};
+  // Group label -> the Odoo domain that selects that group's transfers.
+  final Map<String, List<dynamic>> _groupDomains = {};
 
   List<Map<String, dynamic>> _pickingTypes = [];
   List<Map<String, dynamic>> _locations = [];
@@ -237,8 +247,15 @@ class TransferProvider extends ChangeNotifier {
 
       bool _companyMatches(int? a, int? b) => a == null || b == null || a == b;
 
-      final srcCmp = _locCompany(locationId);
-      final dstCmp = _locCompany(locationDestId);
+      // Prefer a fresh, authoritative company lookup over the cached
+      // `_locations` list (which may be stale or have a blank company_id),
+      // so a location's real company is never missed.
+      final srcCmp =
+          await _service.fetchLocationCompanyId(locationId) ??
+          _locCompany(locationId);
+      final dstCmp =
+          await _service.fetchLocationCompanyId(locationDestId) ??
+          _locCompany(locationDestId);
       if (!_companyMatches(companyIdForPicking, srcCmp) ||
           !_companyMatches(companyIdForPicking, dstCmp)) {
         _isLoading = false;
@@ -248,9 +265,11 @@ class TransferProvider extends ChangeNotifier {
         throw Exception(_error);
       }
 
-      final allowed = companyIdForPicking != null
-          ? [companyIdForPicking]
-          : <int>[];
+      final allowed = <int>{
+        if (companyIdForPicking != null) companyIdForPicking,
+        if (srcCmp != null) srcCmp,
+        if (dstCmp != null) dstCmp,
+      }.toList();
 
       final pickingResult = await OdooSessionManager.callKwWithCompany(
         {
@@ -278,36 +297,58 @@ class TransferProvider extends ChangeNotifier {
           ? pickingResult
           : int.parse(pickingResult.toString());
 
-      final session = await OdooSessionManager.getCurrentSession();
-      final versionStr = session?.odooSession.serverVersion ?? '16';
-      final majorVersion = int.tryParse(versionStr.split('.').first) ?? 16;
-      final isOdoo19OrNewer = majorVersion >= 19;
+      final compat = await OdooCompat.current();
 
-      for (final line in moveLines) {
-        final Map<String, dynamic> moveVals = {
-          'picking_id': pickingId,
-          'product_id': line['product_id'],
-          'product_uom_qty': line['quantity'],
-          'product_uom': line['product_uom'],
-          'location_id': locationId,
-          'location_dest_id': locationDestId,
-          'price_unit': (line['unit_price'] as num?)?.toDouble() ?? 0.0,
-        };
+      // The picking already exists at this point; if a move fails, remove it
+      // again so a failed create doesn't leave an empty transfer behind.
+      try {
+        for (final line in moveLines) {
+          final Map<String, dynamic> moveVals = {
+            'picking_id': pickingId,
+            'product_id': line['product_id'],
+            'product_uom_qty': line['quantity'],
+            compat.stockMoveUomField: line['product_uom'],
+            'location_id': locationId,
+            'location_dest_id': locationDestId,
+            'price_unit': (line['unit_price'] as num?)?.toDouble() ?? 0.0,
+            // stock.picking.scheduled_date is a stored compute derived from
+            // its moves' `date`; without this, a move created without an
+            // explicit date defaults to "now" and immediately overwrites the
+            // scheduled_date just set on the picking above.
+            if (formattedDate != null) 'date': formattedDate,
+          };
 
-        if (!isOdoo19OrNewer) {
-          moveVals['name'] = line['product_name'] ?? 'Internal Transfer';
+          if (compat.stockMoveHasName) {
+            moveVals['name'] = line['product_name'] ?? 'Internal Transfer';
+          }
+
+          final moveResult = await OdooSessionManager.callKwWithCompany(
+            {
+              'model': 'stock.move',
+              'method': 'create',
+              'args': [moveVals],
+              'kwargs': {},
+            },
+            companyId: companyIdForPicking,
+            allowedCompanyIds: allowed,
+          );
         }
-
-        final moveResult = await OdooSessionManager.callKwWithCompany(
-          {
-            'model': 'stock.move',
-            'method': 'create',
-            'args': [moveVals],
-            'kwargs': {},
-          },
-          companyId: companyIdForPicking,
-          allowedCompanyIds: allowed,
-        );
+      } catch (_) {
+        try {
+          await OdooSessionManager.callKwWithCompany(
+            {
+              'model': 'stock.picking',
+              'method': 'unlink',
+              'args': [
+                [pickingId],
+              ],
+              'kwargs': {},
+            },
+            companyId: companyIdForPicking,
+            allowedCompanyIds: allowed,
+          );
+        } catch (_) {}
+        rethrow;
       }
 
       _isLoading = false;
@@ -488,16 +529,19 @@ class TransferProvider extends ChangeNotifier {
       _endDate = endDate;
     }
 
+    final seq = ++_listSeq;
     _isLoading = true;
     _error = null;
     _currentPage = 0;
     notifyListeners();
 
     try {
-      final hasInternal = await _service.hasInternalOperationType();
-      if (!hasInternal) {
+      final operationTypeIssue = await _service
+          .checkInternalOperationTypeStatus();
+      if (seq != _listSeq) return;
+      if (operationTypeIssue != null) {
         _isLoading = false;
-        _error = 'Please enable Storage Locations in Inventory settings.';
+        _error = operationTypeIssue;
         notifyListeners();
         return;
       }
@@ -518,15 +562,21 @@ class TransferProvider extends ChangeNotifier {
         endDate: _endDate,
       );
 
+      if (seq != _listSeq) return;
       _transfers = transfers;
       _totalCount = count;
       _currentPage = 0;
     } catch (e) {
+      if (seq != _listSeq) return;
       _error = 'Failed to fetch transfers: ${OdooErrorMapper.toUserMessage(e)}';
     } finally {
-      _isLoading = false;
-      _hasLoadedOnce = true;
-      notifyListeners();
+      // Only the latest fetch ends the loading: an older one finishing must
+      // not clear it while the newer is still on its way.
+      if (seq == _listSeq) {
+        _isLoading = false;
+        _hasLoadedOnce = true;
+        notifyListeners();
+      }
     }
   }
 
@@ -543,6 +593,7 @@ class TransferProvider extends ChangeNotifier {
   }
 
   Future<void> _fetchSpecificPage() async {
+    final seq = ++_listSeq;
     _isLoading = true;
     _transfers = [];
     _error = null;
@@ -558,13 +609,17 @@ class TransferProvider extends ChangeNotifier {
         offset: _currentPage * _pageSize,
       );
 
+      if (seq != _listSeq) return;
       _transfers = transfers;
     } catch (e) {
+      if (seq != _listSeq) return;
       _error = 'Failed to fetch transfers: $e';
     } finally {
-      _isLoading = false;
-      _hasLoadedOnce = true;
-      notifyListeners();
+      if (seq == _listSeq) {
+        _isLoading = false;
+        _hasLoadedOnce = true;
+        notifyListeners();
+      }
     }
   }
 
@@ -599,6 +654,7 @@ class TransferProvider extends ChangeNotifier {
   Future<void> fetchGroupSummary() async {
     if (_selectedGroupBy == null) return;
 
+    final seq = ++_groupSeq;
     try {
       final summary = await _service.fetchGroupSummary(
         groupByField: _selectedGroupBy!,
@@ -608,10 +664,25 @@ class TransferProvider extends ChangeNotifier {
         endDate: _endDate,
       );
 
-      _groupSummary = summary;
+      // Overtaken by a newer search or filter, or the grouping was removed.
+      if (seq != _groupSeq) return;
+
+      // Groups already open are reloaded under the new counts rather than
+      // left empty.
+      final reopen = _loadedGroups.keys
+          .where((key) => summary.any((g) => g.label == key))
+          .toList();
+      _groupSummary = {for (final g in summary) g.label: g.count};
+      _groupDomains
+        ..clear()
+        ..addAll({for (final g in summary) g.label: g.domain});
       _loadedGroups.clear();
       notifyListeners();
+      for (final groupKey in reopen) {
+        await loadGroupTransfers(groupKey);
+      }
     } catch (e) {
+      if (seq != _groupSeq) return;
       _error =
           'Failed to fetch group summary: ${OdooErrorMapper.toUserMessage(e)}';
       notifyListeners();
@@ -622,28 +693,58 @@ class TransferProvider extends ChangeNotifier {
     if (_loadedGroups.containsKey(groupKey)) return;
 
     try {
-      List<String>? groupStates;
-      if (_selectedGroupBy == 'state') {
-        groupStates = [groupKey];
-      }
-
+      // Loaded by the group's own domain. The old code filtered only a
+      // Status group, so every Priority or Date group listed the same first
+      // 100 transfers whatever it was called.
+      final domain = _groupDomains[groupKey];
       final transfers = await _service.fetchTransfers(
+        domainOverride: domain,
         searchQuery: _searchQuery.isEmpty ? null : _searchQuery,
-        states: groupStates ?? _selectedStates,
+        states: _selectedStates,
         startDate: _startDate,
         endDate: _endDate,
-        limit: 100,
+        limit: _groupPageSize,
       );
 
+      // A newer summary (say, after the search changed) replaced the group's
+      // domain while this loaded: these are the old search's transfers.
+      if (!identical(_groupDomains[groupKey], domain)) return;
       _loadedGroups[groupKey] = transfers;
       notifyListeners();
     } catch (e) {}
   }
 
+  /// Transfers a group (a kanban column, an expanded group) loads at a time.
+  static const int _groupPageSize = 100;
+
+  /// Appends the next page of [groupKey]'s transfers to those it shows —
+  /// the "Load more" of a group holding more than [_groupPageSize].
+  Future<void> loadMoreGroupTransfers(String groupKey) async {
+    final loaded = _loadedGroups[groupKey];
+    final domain = _groupDomains[groupKey];
+    if (loaded == null || domain == null) return loadGroupTransfers(groupKey);
+
+    try {
+      final more = await _service.fetchTransfers(
+        domainOverride: domain,
+        limit: _groupPageSize,
+        offset: loaded.length,
+      );
+      if (!identical(_groupDomains[groupKey], domain)) return;
+      _loadedGroups[groupKey] = [...loaded, ...more];
+      notifyListeners();
+    } catch (_) {
+      // Like a group's first load: the group keeps what it shows.
+    }
+  }
+
   void setGroupBy(String? groupBy) {
     _selectedGroupBy = groupBy;
+    // A summary still on its way belongs to the old grouping.
+    _groupSeq++;
     if (groupBy == null) {
       _groupSummary.clear();
+      _groupDomains.clear();
       _loadedGroups.clear();
     }
     notifyListeners();
@@ -655,7 +756,9 @@ class TransferProvider extends ChangeNotifier {
     _startDate = null;
     _endDate = null;
     _selectedGroupBy = null;
+    _groupSeq++;
     _groupSummary.clear();
+    _groupDomains.clear();
     _loadedGroups.clear();
     notifyListeners();
   }
@@ -801,6 +904,9 @@ class TransferProvider extends ChangeNotifier {
   }
 
   void resetState() {
+    // Answers still on their way are for the state being discarded.
+    _listSeq++;
+    _groupSeq++;
     _isLoading = false;
     _error = null;
     _transfers = [];
@@ -813,6 +919,7 @@ class TransferProvider extends ChangeNotifier {
     _endDate = null;
     _selectedGroupBy = null;
     _groupSummary = {};
+    _groupDomains.clear();
     _loadedGroups.clear();
     _pickingTypes = [];
     _locations = [];

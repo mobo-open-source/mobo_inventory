@@ -8,21 +8,28 @@ import '../../../shared/widgets/loaders/loading_widget.dart';
 import '../routing/app_router.dart';
 import '../routing/app_routes.dart';
 import '../services/haptics_service.dart';
+import '../theme/app_theme.dart';
 
 class LogoutViewModel extends ChangeNotifier {
+  // One logout at a time: a double tap on "Log Out" used to run the whole
+  // sequence twice, stacking two loading dialogs.
+  static bool _inProgress = false;
+
   Future<void> confirmLogout(BuildContext context) async {
+    if (_inProgress) return;
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final confirmed = await showDialog<bool>(
       context: context,
       barrierDismissible: true,
       builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        elevation: isDark ? 0 : 8,
-        backgroundColor: isDark ? Colors.grey[900] : Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        elevation: 0,
+        backgroundColor: isDark ? AppTheme.darkSurface : Colors.white,
         title: Text(
           'Confirm Logout',
           style: Theme.of(context).textTheme.titleLarge?.copyWith(
-            fontWeight: FontWeight.w700,
+            fontSize: 18,
+            fontWeight: FontWeight.bold,
             color: isDark
                 ? Colors.white
                 : Theme.of(context).colorScheme.onSurface,
@@ -44,53 +51,53 @@ class LogoutViewModel extends ChangeNotifier {
           Row(
             children: [
               Expanded(
-                child: OutlinedButton(
-                  onPressed: () => Navigator.of(ctx).pop(false),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: isDark
-                        ? Theme.of(context).primaryColor
-                        : Theme.of(context).primaryColor,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 12,
+                child: SizedBox(
+                  height: 48,
+                  child: OutlinedButton(
+                    onPressed: () => Navigator.of(ctx).pop(false),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Theme.of(context).primaryColor,
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      side: BorderSide(
+                        color: Theme.of(context).primaryColor, // Outline color
+                        width: 1.5,
+                      ),
                     ),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10),
+                    child: const Text(
+                      'Cancel',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
-                    side: BorderSide(
-                      color: Theme.of(context).primaryColor, // Outline color
-                      width: 1,
-                    ),
-                  ),
-                  child: const Text(
-                    'Cancel',
-                    style: TextStyle(fontWeight: FontWeight.w500),
                   ),
                 ),
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: 12),
               Expanded(
-                child: ElevatedButton(
-                  onPressed: () => Navigator.of(ctx).pop(true),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: isDark
-                        ? Theme.of(context).primaryColor
-                        : Theme.of(context).primaryColor,
-                    foregroundColor: isDark
-                        ? Colors.white
-                        : Theme.of(context).colorScheme.onError,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10),
+                child: SizedBox(
+                  height: 48,
+                  child: ElevatedButton(
+                    onPressed: () => Navigator.of(ctx).pop(true),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Theme.of(context).primaryColor,
+                      foregroundColor: Colors.white,
+                      elevation: 0,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      padding: const EdgeInsets.symmetric(vertical: 12),
                     ),
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 20,
-                      vertical: 12,
+                    child: const Text(
+                      'Log Out',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
-                    elevation: isDark ? 0 : 3,
-                  ),
-                  child: const Text(
-                    'Log Out',
-                    style: TextStyle(fontWeight: FontWeight.w600),
                   ),
                 ),
               ),
@@ -100,17 +107,31 @@ class LogoutViewModel extends ChangeNotifier {
       ),
     );
 
-    if (confirmed == true && context.mounted) {
+    if (confirmed == true && context.mounted && !_inProgress) {
       HapticsService.medium();
-      await _performLogout(context);
+      _inProgress = true;
+      try {
+        await _performLogout(context);
+      } finally {
+        _inProgress = false;
+      }
     }
   }
 
+  /// Everything after the confirmation goes through the root navigator, not
+  /// the Profile screen's [context]: clearing the session resets every
+  /// provider, which rebuilds (and can unmount) that screen mid-logout. The
+  /// old code then skipped the navigation and left the user on a Profile
+  /// screen with no account behind it.
   Future<void> _performLogout(BuildContext context) async {
+    final sessionService = context.read<SessionService>();
+    final reduceMotion = context.read<SettingsProvider>().reduceMotion;
+    final rootContext = AppRouter.rootNavigatorKey.currentContext ?? context;
     BuildContext? dialogContext;
 
     showDialog(
-      context: context,
+      context: rootContext,
+      useRootNavigator: true,
       barrierDismissible: false,
       builder: (ctx) {
         dialogContext = ctx;
@@ -121,11 +142,11 @@ class LogoutViewModel extends ChangeNotifier {
         return PopScope(
           canPop: false,
           child: Dialog(
-            backgroundColor: isDark ? Colors.grey[900] : Colors.white,
+            backgroundColor: isDark ? AppTheme.darkSurface : Colors.white,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(20),
             ),
-            elevation: 8,
+            elevation: 0,
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 32),
               child: Column(
@@ -135,15 +156,12 @@ class LogoutViewModel extends ChangeNotifier {
                     decoration: BoxDecoration(
                       color: Theme.of(
                         context,
-                      ).colorScheme.primary.withOpacity(0.08),
+                      ).colorScheme.primary.withValues(alpha: 0.1),
                       shape: BoxShape.circle,
                     ),
                     padding: const EdgeInsets.all(16),
                     child: Builder(
                       builder: (_) {
-                        final reduceMotion = context
-                            .read<SettingsProvider>()
-                            .reduceMotion;
                         if (reduceMotion) {
                           return Icon(
                             Icons.hourglass_empty_rounded,
@@ -185,24 +203,31 @@ class LogoutViewModel extends ChangeNotifier {
       },
     );
 
-    await Future.delayed(const Duration(milliseconds: 900));
+    // Brief pause so the dialog is seen rather than flashing.
+    await Future.delayed(const Duration(milliseconds: 600));
 
-    await context.read<SessionService>().logout();
-
-    if (dialogContext != null && dialogContext!.mounted) {
-      Navigator.of(dialogContext!).pop();
+    try {
+      await sessionService.logout();
+    } finally {
+      // Close the loading dialog whatever happened; the session is cleared
+      // in `logout()`'s own `finally`, so signing out always completes.
+      final dc = dialogContext;
+      if (dc != null && dc.mounted) Navigator.of(dc).pop();
     }
 
-    if (context.mounted) {
-      context.goNamed(AppRoutes.app);
+    // `go` replaces the whole stack (Profile, the shell and anything pushed
+    // on it), so Back cannot return to a screen of the signed-out account.
+    // The app entry then shows the login screen, or Get Started when needed.
+    final navContext = AppRouter.rootNavigatorKey.currentContext;
+    if (navContext == null || !navContext.mounted) return;
+    navContext.goNamed(AppRoutes.app);
 
-      Future.delayed(const Duration(milliseconds: 300), () {
-        final rootContext = AppRouter.rootNavigatorKey.currentContext;
-        if (rootContext != null && rootContext.mounted) {
-          CustomSnackbar.showSuccess(rootContext, 'Logged out successfully');
-          HapticsService.success();
-        }
-      });
-    }
+    Future.delayed(const Duration(milliseconds: 300), () {
+      final ctx = AppRouter.rootNavigatorKey.currentContext;
+      if (ctx != null && ctx.mounted) {
+        CustomSnackbar.showSuccess(ctx, 'Logged out successfully');
+        HapticsService.success();
+      }
+    });
   }
 }

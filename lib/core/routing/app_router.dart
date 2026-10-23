@@ -1,4 +1,5 @@
 import 'dart:typed_data';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
@@ -42,7 +43,9 @@ import '../../features/inventory/providers/stock_location_provider.dart';
 import '../../features/warehouse/providers/warehouse_provider.dart';
 import '../../features/locations/providers/location_provider.dart';
 import '../../features/manufacturing/providers/manufacturing_provider.dart';
+import '../theme/app_theme.dart';
 import 'app_routes.dart';
+import '../services/access_rights_service.dart';
 
 class AppRouter {
   AppRouter._();
@@ -50,29 +53,24 @@ class AppRouter {
   static final GlobalKey<NavigatorState> rootNavigatorKey =
       GlobalKey<NavigatorState>(debugLabel: 'root_navigator');
 
-  static CustomTransitionPage<T> _buildPageWithSlideTransition<T>({
+  // Uses CupertinoPage rather than a custom SlideTransition so every screen
+  // built through this helper keeps the native iOS edge-swipe-to-pop gesture
+  // (CustomTransitionPage bypasses CupertinoPageTransitionsBuilder entirely,
+  // which is what implements that gesture).
+  static CupertinoPage<T> _buildPageWithSlideTransition<T>({
     required Widget child,
     required GoRouterState state,
   }) {
-    return CustomTransitionPage<T>(
-      key: state.pageKey,
-      child: child,
-      transitionsBuilder: (context, animation, secondaryAnimation, child) {
-        const begin = Offset(1.0, 0.0);
-        const end = Offset.zero;
-        const curve = Curves.easeInOut;
-
-        var tween = Tween(
-          begin: begin,
-          end: end,
-        ).chain(CurveTween(curve: curve));
-
-        var offsetAnimation = animation.drive(tween);
-
-        return SlideTransition(position: offsetAnimation, child: child);
-      },
-    );
+    return CupertinoPage<T>(key: state.pageKey, child: child);
   }
+
+  /// Sends navigation aimed at a tab the user's Odoo rights hide (e.g. a
+  /// dashboard link or a recently opened item) to the Dashboard, before the
+  /// hidden tab's screen builds and starts loading data it can't read.
+  static String? _hiddenTabRedirect(int branch) =>
+      AccessRightsService.instance.isBranchVisible(branch)
+      ? null
+      : AppRoutes.dashboard;
 
   static final GoRouter _router = GoRouter(
     navigatorKey: rootNavigatorKey,
@@ -80,7 +78,9 @@ class AppRouter {
     errorBuilder: (context, state) {
       final isDark = Theme.of(context).brightness == Brightness.dark;
       return Scaffold(
-        backgroundColor: isDark ? const Color(0xFF121212) : Colors.white,
+        backgroundColor: isDark
+            ? AppTheme.darkScaffold
+            : AppTheme.scaffoldBackground,
         appBar: AppBar(
           title: const Text('Something went wrong'),
           backgroundColor: Colors.transparent,
@@ -97,7 +97,7 @@ class AppRouter {
                 Icon(
                   Icons.error_outline,
                   size: 56,
-                  color: isDark ? Colors.red[300] : Colors.red[700],
+                  color: isDark ? StatusColors.errorIcon : StatusColors.red,
                 ),
                 const SizedBox(height: 16),
                 Text(
@@ -218,8 +218,16 @@ class AppRouter {
       GoRoute(
         name: AppRoutes.resetPassword,
         path: AppRoutes.resetPassword,
-        pageBuilder: (context, state) =>
-            const NoTransitionPage(child: ResetPasswordScreen()),
+        pageBuilder: (context, state) {
+          final extra = state.extra;
+          final args = extra is Map ? extra : const {};
+          return NoTransitionPage(
+            child: ResetPasswordScreen(
+              url: args['url'] as String?,
+              database: args['database'] as String?,
+            ),
+          );
+        },
       ),
 
       StatefulShellRoute.indexedStack(
@@ -243,6 +251,8 @@ class AppRouter {
               GoRoute(
                 name: AppRoutes.inventory,
                 path: AppRoutes.inventory,
+                redirect: (context, state) =>
+                    _hiddenTabRedirect(AccessRightsService.inventoryBranch),
                 pageBuilder: (context, state) => NoTransitionPage(
                   child: const InventoryProductsListScreen(),
                 ),
@@ -255,6 +265,8 @@ class AppRouter {
               GoRoute(
                 name: AppRoutes.transfer,
                 path: AppRoutes.transfer,
+                redirect: (context, state) =>
+                    _hiddenTabRedirect(AccessRightsService.transferBranch),
                 pageBuilder: (context, state) =>
                     NoTransitionPage(child: const TransferListScreen()),
               ),
@@ -266,6 +278,8 @@ class AppRouter {
               GoRoute(
                 name: AppRoutes.replenishment,
                 path: AppRoutes.replenishment,
+                redirect: (context, state) =>
+                    _hiddenTabRedirect(AccessRightsService.replenishmentBranch),
                 pageBuilder: (context, state) {
                   final args = state.extra as Map<String, dynamic>?;
                   final initialSearchQuery =
@@ -285,6 +299,8 @@ class AppRouter {
               GoRoute(
                 name: AppRoutes.moveHistory,
                 path: AppRoutes.moveHistory,
+                redirect: (context, state) =>
+                    _hiddenTabRedirect(AccessRightsService.historyBranch),
                 pageBuilder: (context, state) =>
                     NoTransitionPage(child: const MoveHistoryScreen()),
               ),
@@ -433,6 +449,13 @@ class AppRouter {
         path: AppRoutes.inventoryProductEdit,
         pageBuilder: (context, state) {
           final args = state.extra as Map<String, dynamic>?;
+          // `{'create': true}` opens the same form to create a new product.
+          if (args?['create'] == true) {
+            return _buildPageWithSlideTransition(
+              child: const InventoryProductEditScreen(),
+              state: state,
+            );
+          }
           final productId = args?['productId'];
           if (productId == null) {
             return _buildPageWithSlideTransition(
@@ -527,6 +550,22 @@ class AppRouter {
         path: AppRoutes.receiptList,
         pageBuilder: (context, state) => _buildPageWithSlideTransition(
           child: const ReceiptListScreen(),
+          state: state,
+        ),
+      ),
+      GoRoute(
+        name: AppRoutes.internalTransferList,
+        path: AppRoutes.internalTransferList,
+        pageBuilder: (context, state) => _buildPageWithSlideTransition(
+          child: const InternalTransferListScreen(),
+          state: state,
+        ),
+      ),
+      GoRoute(
+        name: AppRoutes.posOrderList,
+        path: AppRoutes.posOrderList,
+        pageBuilder: (context, state) => _buildPageWithSlideTransition(
+          child: const PosOrderListScreen(),
           state: state,
         ),
       ),

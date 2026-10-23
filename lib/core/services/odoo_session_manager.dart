@@ -16,12 +16,49 @@ class OdooSessionManager {
   static bool _isRefreshing = false;
   static DateTime? _lastAuthTime;
 
+  /// While true, a session is held in memory only: nothing it would normally
+  /// write — prefs, the cached password in secure storage, the last-server
+  /// hints — is written.
+  ///
+  /// This exists so a candidate account (e.g. one picked in "Switch Account")
+  /// can be probed *before* the app commits it to the device. Without it the
+  /// probes themselves persist the account, because every RPC runs through
+  /// [getClientEnsured], which saves whatever session is current — so an
+  /// account this app went on to refuse was already stored by the time it
+  /// could say no.
+  ///
+  /// Set by [beginProvisionalSession], cleared by [commitProvisionalSession]
+  /// or [discardProvisionalSession].
+  static bool _suspendPersistence = false;
+
+  /// `serverUrl|database|userId` of the account whose session is committed —
+  /// the one the app's screens are showing. Unlike [_cachedSession] it does
+  /// not move during a provisional attempt, so a switch that is refused
+  /// never counts as an account change.
+  static String? _committedAccountKey;
+
+  static String? _accountKeyOf(AppSessionData? s) =>
+      s == null ? null : '${s.serverUrl}|${s.database}|${s.userId}';
+
+  /// Every committed session change goes through here, so the committed
+  /// account is always known.
+  static void _notifySessionUpdated(AppSessionData session) {
+    _committedAccountKey = _accountKeyOf(session);
+    _onSessionUpdated?.call(session);
+  }
+
   static const int _maxRetries = 3;
   static const Duration _baseDelay = Duration(milliseconds: 500);
   static const Duration _sessionCacheValidDuration = Duration(minutes: 5);
 
   static Function(AppSessionData)? _onSessionUpdated;
   static Function()? _onSessionCleared;
+  // Fired when a silent re-auth (using the stored password) fails after the
+  // server rejected the current session — i.e. the session actually expired
+  // and the cached credentials no longer work. Guarded by [_sessionExpiredNotified]
+  // so concurrent failing requests only trigger the UI once.
+  static Function()? _onSessionExpired;
+  static bool _sessionExpiredNotified = false;
 
   @visibleForTesting
   static void setClientForTesting(OdooClient? client) {
@@ -43,6 +80,8 @@ class OdooSessionManager {
     _lastAuthTime = null;
     _onSessionUpdated = null;
     _onSessionCleared = null;
+    _onSessionExpired = null;
+    _sessionExpiredNotified = false;
     _authenticateMock = null;
   }
 
@@ -73,6 +112,14 @@ class OdooSessionManager {
   }) {
     _onSessionUpdated = onSessionUpdated;
     _onSessionCleared = onSessionCleared;
+  }
+
+  /// Sets the callback fired when a silent re-auth attempt fails after the
+  /// server rejects the current session (see [refreshSession]). Kept as a
+  /// separate setter so it doesn't disturb the existing single call site of
+  /// [setSessionCallbacks].
+  static void setSessionExpiredCallback(Function() callback) {
+    _onSessionExpired = callback;
   }
 
   static bool _isRetryableError(Object e) {
@@ -128,7 +175,7 @@ class OdooSessionManager {
       _lastAuthTime = DateTime.now();
       await refreshed.saveToPrefs();
       ConnectivityService.instance.setCurrentServerUrl(refreshed.serverUrl);
-      _onSessionUpdated?.call(refreshed);
+      _notifySessionUpdated(refreshed);
       return true;
     } on NoInternetException catch (_) {
       return false;
@@ -140,7 +187,17 @@ class OdooSessionManager {
   }
 
   static bool _isAuthError(Object e) {
+    // Odoo's own verdict: JSON-RPC error code 100, which odoo_rpc raises as
+    // this dedicated type.
+    if (e is OdooSessionExpiredException) return true;
+
     final errorStr = e.toString().toLowerCase();
+    // Deliberately no "server error" / "500": odoo_rpc reports every
+    // ordinary business error (UserError, ValidationError, ...) as
+    // "Odoo Server Error", and treating those as an expired session forced a
+    // password re-login and a replay of the failed call for each one — and,
+    // with a stale saved password, popped "Session Expired" over a plain
+    // validation message.
     return errorStr.contains('401') ||
         errorStr.contains('unauthorized') ||
         errorStr.contains('access denied') ||
@@ -149,8 +206,17 @@ class OdooSessionManager {
         errorStr.contains('authentication') ||
         errorStr.contains('forbidden') ||
         errorStr.contains('403') ||
-        errorStr.contains('server error') ||
-        errorStr.contains('500');
+        (errorStr.contains('odooexception') &&
+            (errorStr.contains('session_expired') ||
+                errorStr.contains('token_expired'))) ||
+        // Odoo redirects an expired session to its HTML login page instead
+        // of returning a JSON-RPC error — the client's JSON decoder then
+        // throws a FormatException whose message embeds that HTML, e.g.
+        // "FormatException: Unexpected character (at character 1)\n<!DOCTYPE html>".
+        // Without this, that failure mode never gets classified as an auth
+        // error, so the silent-reauth-then-"session expired" flow never runs.
+        errorStr.contains('<!doctype html') ||
+        errorStr.contains('<html');
   }
 
   /// Retrieves the current session data from cache or preferences.
@@ -169,6 +235,7 @@ class OdooSessionManager {
 
       _client = OdooClient(saved.serverUrl, sessionId: saved.odooSession);
       _cachedSession = saved;
+      _committedAccountKey = _accountKeyOf(saved);
       _lastAuthTime = DateTime.now();
       ConnectivityService.instance.setCurrentServerUrl(saved.serverUrl);
 
@@ -208,9 +275,10 @@ class OdooSessionManager {
       if (session != null) {
         _cachedSession = session;
         _lastAuthTime = DateTime.now();
+        _sessionExpiredNotified = false;
         await session.saveToPrefs();
         ConnectivityService.instance.setCurrentServerUrl(session.serverUrl);
-        _onSessionUpdated?.call(session);
+        _notifySessionUpdated(session);
         return true;
       }
       return false;
@@ -339,18 +407,25 @@ class OdooSessionManager {
           allowedCompanyIds: allowedCompanyIds,
         );
 
-        await sessionData.saveToPrefs();
+        // Held back while this session is provisional: the caller is about
+        // to probe the account and will commit or discard it.
+        if (!_suspendPersistence) {
+          await sessionData.saveToPrefs();
 
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.setString('lastServerUrl', normalizedUrl);
-        await prefs.setString('lastDatabase', database);
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setString('lastServerUrl', normalizedUrl);
+          await prefs.setString('lastDatabase', database);
+        }
 
         _client = client;
         _cachedSession = sessionData;
         _lastAuthTime = DateTime.now();
+        _sessionExpiredNotified = false;
 
         ConnectivityService.instance.setCurrentServerUrl(normalizedUrl);
-        _onSessionUpdated?.call(sessionData);
+        if (!_suspendPersistence) {
+          _notifySessionUpdated(sessionData);
+        }
 
         return true;
       } catch (e) {
@@ -485,11 +560,23 @@ class OdooSessionManager {
         );
 
         _cachedSession = sessionData;
+        // The client that just authenticated is the one this session belongs
+        // to. Keeping it means the calls that follow run as this account,
+        // instead of [getClientEnsured] handing back the client cached for
+        // whichever account was signed in before.
+        _client = client;
+        _lastAuthTime = DateTime.now();
+        _sessionExpiredNotified = false;
         ConnectivityService.instance.setCurrentServerUrl(normalizedUrl);
 
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.setString('lastServerUrl', normalizedUrl);
-        await prefs.setString('lastDatabase', database);
+        // Held back while this session is provisional, so an account that is
+        // about to be refused does not leave the server it came from as the
+        // one this app offers next time.
+        if (!_suspendPersistence) {
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setString('lastServerUrl', normalizedUrl);
+          await prefs.setString('lastDatabase', database);
+        }
 
         return sessionData;
       } catch (e) {
@@ -517,6 +604,66 @@ class OdooSessionManager {
     throw Exception('Authentication failed after $_maxRetries attempts');
   }
 
+  /// Holds back every session write until [commitProvisionalSession] or
+  /// [discardProvisionalSession] is called.
+  ///
+  /// Call this *before* authenticating a candidate account (e.g. one picked
+  /// in "Switch Account"), so the sign-in and any checks that follow it leave
+  /// nothing on the device. The session still becomes the active one in
+  /// memory, which is what makes those checks run as the account being
+  /// tested rather than as the one that was already signed in.
+  static void beginProvisionalSession() {
+    _suspendPersistence = true;
+  }
+
+  /// Writes the provisional session through and resumes normal persistence.
+  ///
+  /// Call only once the candidate account has passed every check this app
+  /// makes, so nothing refused ever reaches the device.
+  static Future<AppSessionData?> commitProvisionalSession() async {
+    _suspendPersistence = false;
+
+    final session = _cachedSession;
+    if (session == null) return null;
+
+    await session.saveToPrefs();
+
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('lastServerUrl', session.serverUrl);
+    await prefs.setString('lastDatabase', session.database);
+
+    ConnectivityService.instance.setCurrentServerUrl(session.serverUrl);
+    _notifySessionUpdated(session);
+
+    return session;
+  }
+
+  /// Drops the provisional session and puts [previous] back, or signs out
+  /// when there was no account before it.
+  ///
+  /// Nothing the refused attempt touched survives: it was never written, and
+  /// restoring [previous] rewrites the in-memory state and the client that
+  /// goes with it.
+  static Future<void> discardProvisionalSession(
+    AppSessionData? previous,
+  ) async {
+    // No-op once the session has been committed or already discarded, so
+    // this is safe to call from a broad catch that also covers the paths
+    // where the account was accepted.
+    if (!_suspendPersistence) return;
+
+    _suspendPersistence = false;
+    _client = null;
+    _lastAuthTime = null;
+
+    if (previous != null) {
+      await updateSession(previous);
+    } else {
+      _cachedSession = null;
+      await logout();
+    }
+  }
+
   static Future<void> updateSession(AppSessionData newSession) async {
     _cachedSession = newSession;
     await newSession.saveToPrefs();
@@ -526,7 +673,7 @@ class OdooSessionManager {
     _lastAuthTime = null;
 
     ConnectivityService.instance.setCurrentServerUrl(newSession.serverUrl);
-    _onSessionUpdated?.call(newSession);
+    _notifySessionUpdated(newSession);
   }
 
   /// Centralized error formatting logic ported from mobo_attendance
@@ -594,6 +741,18 @@ class OdooSessionManager {
         throw StateError('No Odoo session available. Please login.');
       }
 
+      // Identity of the session we're about to refresh. If a concurrent
+      // account switch (or login) replaces the global session while the
+      // network round-trip below is in flight, this snapshot lets the
+      // catch block detect that its failure no longer applies to the
+      // currently active account and must not be acted on.
+      final refreshingUserId = session.userId;
+      final refreshingSessionId = session.sessionId;
+      bool isSuperseded() =>
+          _cachedSession == null ||
+          _cachedSession!.userId != refreshingUserId ||
+          _cachedSession!.sessionId != refreshingSessionId;
+
       try {
         await ConnectivityService.instance.ensureInternetOrThrow();
         await ConnectivityService.instance.ensureServerReachable(
@@ -607,6 +766,13 @@ class OdooSessionManager {
           session.password,
         );
 
+        // Another login/switch already replaced the active session while
+        // this re-auth was in flight — applying our (now stale) result
+        // would clobber whatever the user switched to.
+        if (isSuperseded()) {
+          return await isSessionValid();
+        }
+
         _client = client;
 
         final refreshedSession = session.copyWith(
@@ -616,19 +782,35 @@ class OdooSessionManager {
 
         _cachedSession = refreshedSession;
         _lastAuthTime = DateTime.now();
-        await refreshedSession.saveToPrefs();
-        _onSessionUpdated?.call(refreshedSession);
+        // A refresh triggered while probing a candidate account must not be
+        // what writes that account to the device.
+        if (!_suspendPersistence) {
+          await refreshedSession.saveToPrefs();
+          _notifySessionUpdated(refreshedSession);
+        }
 
         ConnectivityService.instance.setCurrentServerUrl(
           refreshedSession.serverUrl,
         );
 
+        _sessionExpiredNotified = false;
         return true;
       } on NoInternetException catch (e) {
+        // Connectivity issue, not a credential rejection — don't show the
+        // "session expired" dialog for a simple offline blip.
         return false;
       } on ServerUnreachableException catch (e) {
         return false;
       } catch (e) {
+        // This failure belongs to a session that a concurrent switch/login
+        // has already superseded — it says nothing about the currently
+        // active account, so it must not touch its cache or pop the
+        // "session expired" dialog on top of it (that dialog's "Log In
+        // Again" button logs out, destroying the session just switched to).
+        if (isSuperseded()) {
+          return await isSessionValid();
+        }
+
         // Apply backoff: Prevent immediate retries by bumping expiry time in memory only.
         // This stops the infinite loop (getClientEnsured -> isExpired -> refresh -> fail -> repeat).
         // The backoff is NOT persisted, so app restart will retry immediately.
@@ -638,6 +820,15 @@ class OdooSessionManager {
             expiresAt: DateTime.now().add(const Duration(minutes: 5)),
           );
           // Do NOT save to prefs - we want persistent failure state to remain until success
+        }
+
+        // Only treat this as a genuine session expiry if the server actually
+        // rejected the credentials — a raw network failure reaching that
+        // point (e.g. "Connection refused" mid-request) is not a credential
+        // rejection and must not show the "please log in again" dialog.
+        if (!_isRetryableError(e) && !_sessionExpiredNotified) {
+          _sessionExpiredNotified = true;
+          _onSessionExpired?.call();
         }
 
         return false;
@@ -677,8 +868,18 @@ class OdooSessionManager {
       }
     }
 
-    // Reuse existing client if valid
+    // Reuse existing client if valid, and only while it still belongs to the
+    // session that is current. Without this check, a client cached for the
+    // previous account is handed back for up to [_sessionCacheValidDuration]
+    // after a different account becomes current — which is exactly the
+    // window "add account" and "switch account" run their probes in, so
+    // those probes would answer for the wrong account. The server is
+    // compared as well as the user: the same uid (e.g. admin = 2) on a
+    // different server would otherwise pass.
     if (_client != null &&
+        _cachedSession != null &&
+        _client!.sessionId?.userId == _cachedSession!.userId &&
+        _client!.baseURL == Uri.parse(_cachedSession!.serverUrl).origin &&
         _lastAuthTime != null &&
         DateTime.now().difference(_lastAuthTime!) <
             _sessionCacheValidDuration) {
@@ -706,7 +907,12 @@ class OdooSessionManager {
         expiresAt: DateTime.now().add(const Duration(hours: 24)),
       );
       _cachedSession = updatedSession;
-      await updatedSession.saveToPrefs();
+      // This is the write that used to persist an account behind the app's
+      // back: the module/access probes run as ordinary RPCs, and every RPC
+      // lands here.
+      if (!_suspendPersistence) {
+        await updatedSession.saveToPrefs();
+      }
 
       return client;
     } on NoInternetException catch (e) {
@@ -720,11 +926,26 @@ class OdooSessionManager {
   static Future<T> callWithSession<T>(
     Future<T> Function(OdooClient client) action,
   ) async {
+    // The account this request belongs to. If a different account is
+    // committed by the time it answers — the user switched, added an account,
+    // or logged out while it was in flight — the answer is for an account the
+    // screens no longer show, and delivering it would put the old account's
+    // records into lists that were just reset for the new one.
+    final startedFor = _committedAccountKey;
+    bool accountChanged() =>
+        startedFor != null && _committedAccountKey != startedFor;
+
     final client = await getClientEnsured();
 
     try {
-      return await action(client);
+      final result = await action(client);
+      if (accountChanged()) return _abandoned<T>();
+      return result;
     } catch (e) {
+      // A failure for the outgoing account is just as stale as a result:
+      // surfacing it would show an error on the new account's screen.
+      if (accountChanged()) return _abandoned<T>();
+
       // Don't retry on connectivity issues
       if (e is NoInternetException || e is ServerUnreachableException) {
         rethrow;
@@ -733,15 +954,27 @@ class OdooSessionManager {
       // Retry once on auth errors
       if (_isAuthError(e)) {
         final refreshed = await refreshSession();
+        if (accountChanged()) return _abandoned<T>();
         if (refreshed) {
           final newClient = await getClientEnsured();
-          return await action(newClient);
-        } else {}
+          final result = await action(newClient);
+          if (accountChanged()) return _abandoned<T>();
+          return result;
+        }
       }
 
       rethrow;
     }
   }
+
+  /// A future that never completes, for a request whose account is gone.
+  ///
+  /// Neither a value nor an error: both would be applied by the caller to
+  /// state that now belongs to another account. Every account-scoped
+  /// provider is reset on an account change (see `resetAllAppProviders`),
+  /// and the screens that started these requests are torn down with the
+  /// navigation stack, so nothing is left waiting on them.
+  static Future<T> _abandoned<T>() => Completer<T>().future;
 
   /// Safe wrapper for callKw with automatic company context injection
   /// This is the recommended method for all RPC calls to ensure proper multi-company support
@@ -944,7 +1177,87 @@ class OdooSessionManager {
     _cachedSession = updatedSession;
     await updatedSession.saveToPrefs();
 
-    _onSessionUpdated?.call(updatedSession);
+    _notifySessionUpdated(updatedSession);
+  }
+
+  static Future<Map<String, dynamic>?> getSessionInfo() async {
+    try {
+      // Routed through callWithSession (not a raw client.callRPC call) so an
+      // expired session hitting this endpoint goes through the exact same
+      // _isAuthError -> refreshSession -> "session expired" popup pipeline as
+      // every other RPC call. Previously this used its own client + try/catch
+      // and silently swallowed the auth failure, so a session that expired
+      // while only this call was in flight (e.g. company init) never
+      // triggered the popup at all.
+      final result = await callWithSession(
+        (client) => client.callRPC('/web/session/get_session_info', 'call', {}),
+      );
+      if (result is Map<String, dynamic>) return result;
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Lightweight session refresh: fetches `/web/session/get_session_info` and
+  /// updates the local cached session with the latest company context from the
+  /// server WITHOUT performing a full password re-authentication.
+  ///
+  /// Use this after a company switch instead of [refreshSession] to avoid the
+  /// re-auth overwriting the company context we just applied.
+  static Future<bool> refreshSessionInfo() async {
+    try {
+      final info = await getSessionInfo();
+      if (info == null) return false;
+
+      final session = await getCurrentSession();
+      if (session == null) return false;
+
+      // Parse the current company from session_info
+      int? companyId;
+      if (info['company_id'] is int) {
+        companyId = info['company_id'] as int;
+      }
+
+      // Parse allowed companies from user_companies if present (Odoo 17/18 style)
+      List<int> allowedIds = [];
+      final userCompaniesRaw = info['user_companies'];
+      if (userCompaniesRaw is Map) {
+        try {
+          final allowedRaw = userCompaniesRaw['allowed_companies'];
+          if (allowedRaw is Map) {
+            allowedIds = allowedRaw.keys
+                .map((k) => int.tryParse(k.toString()) ?? -1)
+                .where((id) => id > 0)
+                .toList();
+          }
+        } catch (_) {
+          // Fallback to existing if parsing fails
+          allowedIds = session.allowedCompanyIds;
+        }
+      }
+
+      if (allowedIds.isEmpty) {
+        allowedIds = session.allowedCompanyIds;
+      }
+
+      // Ensure the active company is in the allowed list
+      if (companyId != null && !allowedIds.contains(companyId)) {
+        allowedIds.add(companyId);
+      }
+
+      final updatedSession = session.copyWith(
+        selectedCompanyId: companyId ?? session.selectedCompanyId,
+        allowedCompanyIds: allowedIds,
+      );
+
+      _cachedSession = updatedSession;
+      await updatedSession.saveToPrefs();
+      _notifySessionUpdated(updatedSession);
+      return true;
+    } catch (_) {
+      return false;
+    }
   }
 
   static Future<void> clearCompanySelection() async {
@@ -959,7 +1272,7 @@ class OdooSessionManager {
     _cachedSession = updatedSession;
     await updatedSession.saveToPrefs();
 
-    _onSessionUpdated?.call(updatedSession);
+    _notifySessionUpdated(updatedSession);
   }
 
   /// Call Odoo method with company context
@@ -998,13 +1311,17 @@ class OdooSessionManager {
     if (selectedCompany != null) {
       ctx['company_id'] = selectedCompany;
 
-      // Ensure selected company is in allowed companies
-      List<int> finalAllowed = [...(allowed ?? [])];
-      if (!finalAllowed.contains(selectedCompany)) {
-        finalAllowed.add(selectedCompany);
-      }
-
-      ctx['allowed_company_ids'] = <int>{...finalAllowed}.toList();
+      // The selected company goes FIRST, not appended. Odoo derives
+      // `env.company` from `allowed_company_ids[0]` and ignores the
+      // `company_id` context key entirely for that purpose. Appending meant
+      // that for a user allowed [1, 3] who had selected 3, every call still
+      // ran with `env.company` = 1 — so anything the server scopes to the
+      // active company silently used the wrong one. `hr`'s
+      // `res.users.employee_id`, for instance, is computed as the employee
+      // whose `company_id == env.company`, which is why it read back as
+      // `false` for a user who plainly has an employee record.
+      final rest = <int>{...(allowed ?? [])}..remove(selectedCompany);
+      ctx['allowed_company_ids'] = <int>[selectedCompany, ...rest];
     }
 
     kwargs['context'] = ctx;
@@ -1025,6 +1342,7 @@ class OdooSessionManager {
     _cachedSession = null;
     _isRefreshing = false;
     _lastAuthTime = null;
+    _sessionExpiredNotified = false;
 
     ConnectivityService.instance.setCurrentServerUrl(null);
 
@@ -1033,6 +1351,7 @@ class OdooSessionManager {
     const keysToRemove = [
       'sessionId',
       'userLogin',
+      'userName',
       'database',
       'serverUrl',
       'userId',
@@ -1046,6 +1365,7 @@ class OdooSessionManager {
       await prefs.remove(key);
     }
 
+    _committedAccountKey = null;
     _onSessionCleared?.call();
   }
 

@@ -80,7 +80,8 @@ class _AppLockScreenState extends State<AppLockScreen> {
         setState(() {
           _isAuthenticating = false;
           _authenticationFailed = true;
-          _errorMessage = 'Authentication error: ${e.toString()}';
+          _errorMessage =
+              'Biometric authentication is unavailable right now. Please try again.';
         });
       }
     }
@@ -290,7 +291,7 @@ class _AppLockScreenState extends State<AppLockScreen> {
             child: Text(
               'Try Again',
               style: GoogleFonts.poppins(
-                fontSize: 14,
+                fontSize: 16,
                 fontWeight: FontWeight.bold,
               ),
             ),

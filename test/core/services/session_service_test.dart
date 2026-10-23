@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -91,6 +93,85 @@ void main() {
 
       await sessionService.logout();
       expect(sessionService.hasValidSession, isFalse);
+    });
+  });
+
+  group('updateStoredAccountProfile', () {
+    Map<String, dynamic> account(String userId, String name) => {
+      'id': userId,
+      'userId': userId,
+      'name': name,
+      'userName': name,
+      'url': 'https://test.com',
+      'serverUrl': 'https://test.com',
+      'database': 'test_db',
+      'isCurrent': userId == '1',
+    };
+
+    setUp(() async {
+      SharedPreferences.setMockInitialValues({
+        'isLoggedIn': true,
+        'sessionId': 'sess_123',
+        'userLogin': 'admin',
+        'database': 'test_db',
+        'serverUrl': 'https://test.com',
+        'userId': 1,
+        'stored_accounts': [
+          jsonEncode(account('1', 'Mitchell Admin')),
+          jsonEncode(account('2', 'Marc Demo')),
+        ],
+      });
+      await SecureStorageService.instance.storePassword(
+        'session_password_username_admin',
+        'password123',
+      );
+      await sessionService.initialize();
+    });
+
+    Map<String, dynamic> stored(String userId) => sessionService.storedAccounts
+        .firstWhere((a) => a['userId'] == userId);
+
+    test('renames only the account the session belongs to', () async {
+      await sessionService.updateStoredAccountProfile(
+        sessionService.currentSession!,
+        name: 'Mitchell Renamed',
+      );
+
+      expect(stored('1')['userName'], 'Mitchell Renamed');
+      expect(stored('1')['name'], 'Mitchell Renamed');
+      expect(stored('2')['userName'], 'Marc Demo');
+
+      final prefs = await SharedPreferences.getInstance();
+      final saved = prefs
+          .getStringList('stored_accounts')!
+          .map((s) => jsonDecode(s) as Map<String, dynamic>)
+          .firstWhere((a) => a['userId'] == '1');
+      expect(saved['userName'], 'Mitchell Renamed');
+    });
+
+    test('stores the new avatar and clears a removed one', () async {
+      final session = sessionService.currentSession!;
+      await sessionService.updateStoredAccountProfile(
+        session,
+        imageBase64: 'aGVsbG8=',
+      );
+      expect(stored('1')['imageBase64'], 'aGVsbG8=');
+
+      await sessionService.updateStoredAccountProfile(session, imageBase64: '');
+      expect(stored('1')['imageBase64'], isNull);
+    });
+
+    test('does not notify when nothing changed', () async {
+      var notified = 0;
+      void listener() => notified++;
+      sessionService.addListener(listener);
+      addTearDown(() => sessionService.removeListener(listener));
+
+      await sessionService.updateStoredAccountProfile(
+        sessionService.currentSession!,
+        name: 'Mitchell Admin',
+      );
+      expect(notified, 0);
     });
   });
 }

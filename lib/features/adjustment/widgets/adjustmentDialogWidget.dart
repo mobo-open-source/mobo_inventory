@@ -6,7 +6,11 @@ import '../providers/adjustment_provider.dart';
 import '../../../shared/widgets/snackbars/custom_snackbar.dart';
 import '../../../shared/widgets/loaders/loading_indicator.dart';
 import '../../../shared/widgets/dialogs/common_dialog.dart';
+import '../../../core/services/access_rights_service.dart';
 import '../../../core/services/haptics_service.dart';
+import '../../../core/services/review_service.dart';
+import '../../../core/theme/app_theme.dart';
+import '../../../main.dart';
 
 /// A dialog for entering and updating the counted quantity for an inventory adjustment.
 class AdjustmentDialog extends StatefulWidget {
@@ -31,6 +35,20 @@ class _AdjustmentDialogState extends State<AdjustmentDialog> {
     );
     _quantityController.addListener(_calculateDifference);
     _calculateDifference();
+  }
+
+  /// Whether the signed-in user may apply a count, not just record it.
+  /// Fails open like [AccessRightsService]: allowed until Odoo says no, and
+  /// allowed where no service is provided (some widget tests).
+  bool _canApply(BuildContext context, {bool listen = true}) {
+    try {
+      final service = listen
+          ? context.watch<AccessRightsService>()
+          : context.read<AccessRightsService>();
+      return service.canApplyInventoryAdjustment;
+    } on ProviderNotFoundException {
+      return true;
+    }
   }
 
   void _calculateDifference() {
@@ -59,13 +77,17 @@ class _AdjustmentDialogState extends State<AdjustmentDialog> {
       return;
     }
 
+    // Without apply rights the count is only recorded, for a stock manager to
+    // apply — Odoo would refuse `action_apply_inventory` for this user.
+    final canApply = _canApply(context, listen: false);
+
     if (quantity == 0) {
       final confirm = await CommonDialog.confirm(
         context,
         title: 'Set Count to Zero?',
         message:
             'You are about to set the counted quantity to 0. This will adjust stock to zero for this quant. Do you want to continue?',
-        confirmText: 'Yes, Apply',
+        confirmText: canApply ? 'Yes, Apply' : 'Yes, Save',
         cancelText: 'Cancel',
         destructive: true,
       );
@@ -95,6 +117,20 @@ class _AdjustmentDialogState extends State<AdjustmentDialog> {
       return;
     }
 
+    if (!canApply) {
+      if (mounted) {
+        setState(() => _isLoading = false);
+        Navigator.pop(context);
+        CustomSnackbar.showSuccess(
+          context,
+          'Count saved. A stock manager needs to apply it.',
+        );
+        HapticsService.success();
+        provider.refresh();
+      }
+      return;
+    }
+
     final applySuccess = await provider.applyAdjustment(widget.adjustment.id!);
 
     if (mounted) {
@@ -107,6 +143,16 @@ class _AdjustmentDialogState extends State<AdjustmentDialog> {
         );
         HapticsService.success();
         provider.refresh();
+
+        ReviewService().trackSignificantEvent();
+        // Let the success snackbar (a dialog route) dismiss itself before the
+        // rating dialog is pushed, so its timer can't pop the wrong route.
+        Future.delayed(const Duration(milliseconds: 3500), () {
+          final targetContext = navigatorKey.currentContext;
+          if (targetContext != null && targetContext.mounted) {
+            ReviewService().checkAndShowRating(targetContext);
+          }
+        });
       } else {
         CustomSnackbar.showError(
           context,
@@ -123,9 +169,12 @@ class _AdjustmentDialogState extends State<AdjustmentDialog> {
     final theme = Theme.of(context);
 
     return Dialog(
-      elevation: 8,
-      backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      elevation: 0,
+      shadowColor: Colors.transparent,
+      backgroundColor: isDark ? AppTheme.darkSurface : Colors.white,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(AppRadius.pill),
+      ),
       child: ConstrainedBox(
         constraints: BoxConstraints(
           maxWidth: 400,
@@ -140,15 +189,16 @@ class _AdjustmentDialogState extends State<AdjustmentDialog> {
               Row(
                 children: [
                   Container(
-                    padding: const EdgeInsets.all(10),
+                    width: 46,
+                    height: 46,
                     decoration: BoxDecoration(
-                      color: theme.primaryColor.withOpacity(0.12),
-                      borderRadius: BorderRadius.circular(12),
+                      color: theme.primaryColor.withValues(alpha: 0.1),
+                      shape: BoxShape.circle,
                     ),
                     child: Icon(
                       Icons.inventory_2_outlined,
                       color: theme.primaryColor,
-                      size: 20,
+                      size: 22,
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -159,7 +209,7 @@ class _AdjustmentDialogState extends State<AdjustmentDialog> {
                         Text(
                           'Adjust Inventory',
                           style: TextStyle(
-                            fontWeight: FontWeight.w600,
+                            fontWeight: FontWeight.bold,
                             fontSize: 18,
                             color: isDark ? Colors.white : Colors.black87,
                           ),
@@ -221,7 +271,7 @@ class _AdjustmentDialogState extends State<AdjustmentDialog> {
                     child: _buildInfoCard(
                       'On Hand',
                       widget.adjustment.onHandQuantity.toStringAsFixed(2),
-                      isDark ? Colors.blue[300]! : Colors.blue[700]!,
+                      isDark ? StatusColors.infoIcon : StatusColors.blue,
                       isDark,
                     ),
                   ),
@@ -231,9 +281,11 @@ class _AdjustmentDialogState extends State<AdjustmentDialog> {
                       'Difference',
                       '${_difference >= 0 ? '+' : ''}${_difference.toStringAsFixed(2)}',
                       _difference > 0
-                          ? (isDark ? Colors.green[300]! : Colors.green[700]!)
+                          ? (isDark
+                                ? StatusColors.successIcon
+                                : StatusColors.green)
                           : _difference < 0
-                          ? (isDark ? Colors.red[300]! : Colors.red[700]!)
+                          ? (isDark ? StatusColors.errorIcon : StatusColors.red)
                           : (isDark ? Colors.grey[400]! : Colors.grey[600]!),
                       isDark,
                     ),
@@ -245,12 +297,13 @@ class _AdjustmentDialogState extends State<AdjustmentDialog> {
               Text(
                 'Counted Quantity',
                 style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  color: isDark ? Colors.grey[300] : Colors.grey[700],
+                  fontSize: 16,
+                  fontWeight: FontWeight.normal,
+                  color: isDark ? Colors.white60 : Colors.black54,
                 ),
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 10),
+              // §6 — quantity/numeric field.
               TextField(
                 controller: _quantityController,
                 keyboardType: const TextInputType.numberWithOptions(
@@ -259,28 +312,38 @@ class _AdjustmentDialogState extends State<AdjustmentDialog> {
                 inputFormatters: [
                   FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d*')),
                 ],
+                onTapOutside: (_) {
+                  if (_quantityController.text.trim().isEmpty) {
+                    _quantityController.text = '0.0';
+                  }
+                  FocusManager.instance.primaryFocus?.unfocus();
+                },
                 decoration: InputDecoration(
+                  hintText: 'Counted Quantity',
+                  hintStyle: TextStyle(
+                    fontWeight: FontWeight.w400,
+                    fontStyle: FontStyle.italic,
+                    color: isDark ? Colors.grey[400] : Colors.grey[600],
+                  ),
                   filled: true,
-                  fillColor: isDark ? Colors.grey[850] : Colors.white,
+                  fillColor: isDark ? Colors.grey[850] : AppTheme.inputFill,
                   contentPadding: const EdgeInsets.symmetric(
                     horizontal: 16,
                     vertical: 12,
                   ),
                   enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide(
-                      color: isDark ? Colors.grey[800]! : Colors.grey[300]!,
-                    ),
+                    borderRadius: BorderRadius.circular(AppRadius.segment),
+                    borderSide: BorderSide.none,
                   ),
                   focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
+                    borderRadius: BorderRadius.circular(AppRadius.segment),
                     borderSide: BorderSide(color: theme.primaryColor, width: 2),
                   ),
                 ),
                 style: TextStyle(
                   fontSize: 16,
-                  fontWeight: FontWeight.w500,
-                  color: isDark ? Colors.white : Colors.black87,
+                  fontWeight: FontWeight.w600,
+                  color: isDark ? Colors.white : Colors.black,
                 ),
               ),
 
@@ -289,25 +352,29 @@ class _AdjustmentDialogState extends State<AdjustmentDialog> {
               Row(
                 children: [
                   Expanded(
-                    child: TextButton(
-                      onPressed: _isLoading
-                          ? null
-                          : () => Navigator.pop(context),
-                      style: TextButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
+                    child: SizedBox(
+                      height: 48,
+                      child: OutlinedButton(
+                        onPressed: _isLoading
+                            ? null
+                            : () => Navigator.pop(context),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: theme.primaryColor,
                           side: BorderSide(
                             color: theme.primaryColor,
-                            width: 1.2,
+                            width: 1.5,
+                          ),
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
                           ),
                         ),
-                      ),
-                      child: Text(
-                        'Cancel',
-                        style: TextStyle(
-                          color: isDark ? Colors.white70 : theme.primaryColor,
-                          fontWeight: FontWeight.w600,
+                        child: const Text(
+                          'Cancel',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 16,
+                          ),
                         ),
                       ),
                     ),
@@ -315,26 +382,29 @@ class _AdjustmentDialogState extends State<AdjustmentDialog> {
 
                   const SizedBox(width: 12),
                   Expanded(
-                    child: ElevatedButton(
-                      onPressed: _isLoading ? null : _applyAdjustment,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: theme.primaryColor,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
+                    child: SizedBox(
+                      height: 48,
+                      child: ElevatedButton(
+                        onPressed: _isLoading ? null : _applyAdjustment,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: theme.primaryColor,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          elevation: 0,
                         ),
-                        elevation: 0,
-                      ),
-                      child: _isLoading
-                          ? const SmallLoadingIndicator(color: Colors.white)
-                          : const Text(
-                              'Apply',
-                              style: TextStyle(
-                                fontWeight: FontWeight.w600,
-                                fontSize: 16,
+                        child: _isLoading
+                            ? const SmallLoadingIndicator(color: Colors.white)
+                            : Text(
+                                _canApply(context) ? 'Apply' : 'Save Count',
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 16,
+                                ),
                               ),
-                            ),
+                      ),
                     ),
                   ),
                 ],

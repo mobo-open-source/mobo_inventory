@@ -6,13 +6,19 @@ import 'package:provider/provider.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/services/session_service.dart';
+import '../../../core/theme/app_theme.dart';
 import '../../../core/services/odoo_session_manager.dart';
 import '../../../core/services/biometric_context_service.dart';
+import '../../../core/services/inventory_access_service.dart';
+import '../../../core/utils/module_missing_dialog.dart';
+import '../../../shared/widgets/dialogs/access_denied_dialog.dart';
+import '../../../shared/widgets/dialogs/common_dialog.dart';
 import '../../../shared/widgets/snackbars/custom_snackbar.dart';
 import '../../../core/routing/app_routes.dart';
+import '../../login/pages/login_layout.dart'
+    show DatabaseExpiry, DatabaseExpiredException;
 import '../../login/pages/totp_page.dart';
 import '../../../shared/widgets/odoo_avatar.dart';
-import '../../../core/utils/clear_providers.dart';
 
 class SwitchAccountWidget extends StatelessWidget {
   const SwitchAccountWidget({super.key});
@@ -26,17 +32,17 @@ class SwitchAccountWidget extends StatelessWidget {
     return Consumer<SessionService>(
       builder: (context, sessionService, child) {
         final otherAccounts = sessionService.storedAccounts
-            .where(
-              (account) =>
-                  !_isCurrentAccount(account, sessionService) &&
-                  account['serverUrl'] ==
-                      sessionService.currentSession?.serverUrl,
-            )
+            .where((account) => !_isCurrentAccount(account, sessionService))
             .toList();
 
         final accountCount = otherAccounts.length;
 
         return ExpansionTile(
+          // ExpansionTile otherwise falls back to a Border with top/bottom
+          // sides in theme.dividerColor once expanded, which reads as a dark
+          // line cutting between the header and the account list.
+          shape: const Border(),
+          collapsedShape: const Border(),
           leading: Icon(HugeIcons.strokeRoundedUserSwitch, color: iconColor),
           title: const Text(
             'Switch Accounts',
@@ -135,11 +141,13 @@ class SwitchAccountWidget extends StatelessWidget {
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(12),
         color: isCurrent
-            ? (isDark ? Colors.blue[900]!.withOpacity(0.3) : Colors.blue[50])
+            ? (isDark
+                  ? StatusColors.backgroundDark(StatusColors.blue)
+                  : StatusColors.backgroundLight(StatusColors.blue))
             : (isDark ? Colors.grey[800] : Colors.grey[50]),
         border: Border.all(
           color: isCurrent
-              ? (isDark ? Colors.blue[700]! : Colors.blue[300]!)
+              ? StatusColors.blue
               : (isDark ? Colors.grey[700]! : Colors.grey[200]!),
           width: isCurrent ? 2 : 1,
         ),
@@ -160,27 +168,10 @@ class SwitchAccountWidget extends StatelessWidget {
               ),
             ),
             if (isCurrent)
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: isDark ? Colors.blue[700] : Colors.blue[600],
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.check_circle, size: 14, color: Colors.white),
-                    const SizedBox(width: 4),
-                    Text(
-                      'Current',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ],
-                ),
+              StatusColors.buildStatusBadge(
+                'Current',
+                StatusColors.blue,
+                isDark: isDark,
               ),
           ],
         ),
@@ -203,13 +194,13 @@ class SwitchAccountWidget extends StatelessWidget {
                   Icon(
                     Icons.warning_amber_rounded,
                     size: 12,
-                    color: Colors.orange[600],
+                    color: StatusColors.orange,
                   ),
                   const SizedBox(width: 4),
                   Text(
                     'Needs re-authentication',
                     style: TextStyle(
-                      color: Colors.orange[600],
+                      color: StatusColors.orange,
                       fontSize: 11,
                       fontWeight: FontWeight.w500,
                     ),
@@ -221,10 +212,11 @@ class SwitchAccountWidget extends StatelessWidget {
         trailing: isCurrent
             ? null
             : PopupMenuButton<String>(
+                position: PopupMenuPosition.under,
                 icon: Icon(
                   Icons.more_vert,
-                  color: isDark ? Colors.grey[400] : Colors.grey[600],
-                  size: 18,
+                  color: isDark ? Colors.white : Colors.black,
+                  size: 20,
                 ),
                 onSelected: (value) async {
                   if (value == 'remove') {
@@ -234,22 +226,11 @@ class SwitchAccountWidget extends StatelessWidget {
                 itemBuilder: (context) => [
                   PopupMenuItem<String>(
                     value: 'remove',
-                    child: Row(
-                      children: [
-                        Icon(
-                          Icons.delete_outline,
-                          size: 18,
-                          color: Colors.red[600],
-                        ),
-                        const SizedBox(width: 8),
-                        Text(
-                          'Remove',
-                          style: TextStyle(
-                            color: Colors.red[600],
-                            fontSize: 14,
-                          ),
-                        ),
-                      ],
+                    child: Text(
+                      'Remove',
+                      style: TextStyle(
+                        color: isDark ? Colors.white : Colors.black87,
+                      ),
                     ),
                   ),
                 ],
@@ -267,6 +248,7 @@ class SwitchAccountWidget extends StatelessWidget {
     return Container(
       margin: const EdgeInsets.all(16),
       width: double.infinity,
+      height: 48,
       child: ElevatedButton.icon(
         onPressed: () {
           final sessionService = Provider.of<SessionService>(
@@ -285,14 +267,18 @@ class SwitchAccountWidget extends StatelessWidget {
           );
         },
         icon: const Icon(HugeIcons.strokeRoundedUserAdd01, size: 18),
-        label: const Text('Add Account'),
+        label: const Text(
+          'Add Account',
+          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+        ),
         style: ElevatedButton.styleFrom(
+          elevation: 0,
           backgroundColor: Theme.of(context).primaryColor,
           foregroundColor: Colors.white,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),
           ),
-          padding: const EdgeInsets.symmetric(vertical: 16),
+          padding: const EdgeInsets.symmetric(vertical: 12),
         ),
       ),
     );
@@ -324,7 +310,8 @@ class SwitchAccountWidget extends StatelessWidget {
       context: context,
       barrierDismissible: false,
       builder: (ctx) => Dialog(
-        backgroundColor: isDark ? Colors.grey[900] : Colors.white,
+        backgroundColor: isDark ? AppTheme.darkSurface : Colors.white,
+        elevation: 0,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         child: Padding(
           padding: const EdgeInsets.all(24),
@@ -349,6 +336,26 @@ class SwitchAccountWidget extends StatelessWidget {
 
     try {
       await _performDirectAccountSwitch(context, account, sessionService);
+    } on DatabaseExpiredException {
+      if (context.mounted) {
+        Navigator.pop(context);
+        // The switch was rolled back, so the user stays on the account they
+        // were already using.
+        await DatabaseExpiry.showExpiredDialog(context);
+      }
+    } on InventoryModuleMissingException {
+      if (context.mounted) {
+        Navigator.pop(context);
+        // 'OK', not 'Back to Login': the switch was rolled back, so the user
+        // stays signed in on the account they were already using — there is
+        // no login screen for this button to send them to.
+        await showModuleMissingDialog(context, actionLabel: 'OK');
+      }
+    } on InventoryAccessDeniedException catch (e) {
+      if (context.mounted) {
+        Navigator.pop(context);
+        showAccessDeniedDialog(context, message: e.message);
+      }
     } catch (e) {
       if (context.mounted) {
         Navigator.pop(context);
@@ -369,24 +376,32 @@ class SwitchAccountWidget extends StatelessWidget {
             protocol = 'http://';
           }
 
-          final result = await Navigator.push<bool>(
+          // From secure storage, not the account map (which never holds
+          // one): the 2FA page signs in with the password first, and an
+          // empty one is refused before a code is ever asked for.
+          final password =
+              await sessionService.retrievePasswordWithMultiplePatterns(
+                account,
+              ) ??
+              '';
+          if (!context.mounted) return;
+
+          // TotpPage resets providers and navigates into the app itself once
+          // the code is verified, replacing the whole stack, so there is
+          // nothing left to do here on success.
+          await Navigator.push<bool>(
             context,
             MaterialPageRoute(
               builder: (context) => TotpPage(
                 serverUrl: serverUrl,
                 database: account['database'],
                 username: username ?? '',
-                password: account['password'] ?? '',
+                password: password,
                 protocol: protocol,
+                isAddingAccount: true,
               ),
             ),
           );
-          if (result == true) {
-            if (context.mounted) {
-              resetAllAppProviders(context);
-              context.goNamed(AppRoutes.app);
-            }
-          }
           return;
         }
 
@@ -495,10 +510,54 @@ class SwitchAccountWidget extends StatelessWidget {
     final biometricContext = BiometricContextService();
     biometricContext.startAccountOperation('account_switch');
 
+    // Captured before any switch attempt so a failure below can restore
+    // exactly the account that was active, rather than leaving a
+    // half-switched session as the current one.
+    final previousSession = sessionService.currentSession;
+
+    // The account being switched to is held in memory only until it has
+    // passed the checks below, so one this app refuses is never written to
+    // the device in place of the account the user is still signed in to.
+    OdooSessionManager.beginProvisionalSession();
+
+    // An expired database is refused before anything else: none of it is
+    // usable, whatever modules or access rights it has. Module is checked
+    // next: a server missing Inventory is always reported as that, rather
+    // than blamed on the user's own access rights. Portal access is only
+    // checked once the module is confirmed present.
+    Future<void> enforceAccessOrThrow() async {
+      if (await DatabaseExpiry.isCurrentSessionExpired()) {
+        await OdooSessionManager.discardProvisionalSession(previousSession);
+        throw const DatabaseExpiredException();
+      }
+      final accessService = InventoryAccessService();
+      final inventoryInstalled =
+          await accessService.isInventoryModuleInstalled();
+      if (!inventoryInstalled) {
+        await OdooSessionManager.discardProvisionalSession(previousSession);
+        throw const InventoryModuleMissingException();
+      }
+      final isPortal = await accessService.isPortalUser();
+      if (isPortal) {
+        await OdooSessionManager.discardProvisionalSession(previousSession);
+        throw const InventoryAccessDeniedException(
+          InventoryAccessService.portalUserMessage,
+        );
+      }
+      await OdooSessionManager.commitProvisionalSession();
+    }
+
     try {
-      String? password;
       final username =
           account['username']?.toString() ?? account['userName']?.toString();
+
+      // Read up front, not only for the password fallback below: the saved
+      // account map never holds a password (it lives in secure storage), so
+      // passing `account['password']` into the session-id restore handed the
+      // session an empty password — which then wiped the saved one and made
+      // the switched-to account unable to survive a restart or a re-auth.
+      final password = await sessionService
+          .retrievePasswordWithMultiplePatterns(account);
 
       if (account.containsKey('sessionId')) {
         try {
@@ -506,19 +565,26 @@ class SwitchAccountWidget extends StatelessWidget {
             serverUrl: account['serverUrl'],
             database: account['database'],
             userLogin: username ?? '',
-            password: account['password'] ?? '',
+            password: password ?? '',
             sessionId: account['sessionId'],
           );
           if (success) {
+            await enforceAccessOrThrow();
             if (context.mounted) {
               Navigator.pop(context);
-              resetAllAppProviders(context);
+              // Providers are reset by AccountChangeListener the moment the
+              // switched-to account is committed.
               context.goNamed(AppRoutes.app);
               biometricContext.endAccountOperation('account_switch');
             }
             return;
           }
         } catch (e) {
+          if (e is DatabaseExpiredException ||
+              e is InventoryModuleMissingException ||
+              e is InventoryAccessDeniedException) {
+            rethrow;
+          }
           final errorMsg = e.toString().toLowerCase();
           if (errorMsg.contains('two-factor') ||
               errorMsg.contains('totp') ||
@@ -528,10 +594,6 @@ class SwitchAccountWidget extends StatelessWidget {
           }
         }
       }
-
-      password = await sessionService.retrievePasswordWithMultiplePatterns(
-        account,
-      );
 
       if (password == null || password.isEmpty) {
         throw Exception('No password found for account');
@@ -545,9 +607,11 @@ class SwitchAccountWidget extends StatelessWidget {
       );
 
       if (success) {
+        await enforceAccessOrThrow();
         if (context.mounted) {
           Navigator.pop(context);
-          resetAllAppProviders(context);
+          // Providers are reset by AccountChangeListener the moment the
+          // switched-to account is committed.
           context.goNamed(AppRoutes.app);
           biometricContext.endAccountOperation('account_switch');
         }
@@ -555,6 +619,12 @@ class SwitchAccountWidget extends StatelessWidget {
         throw Exception('Authentication failed');
       }
     } catch (e) {
+      // Covers every way out that isn't a completed switch — a refused
+      // password, an unreachable server, the 2FA hand-off — so the account
+      // the user is still signed in to is the one left active, and the
+      // half-finished attempt is never written to the device. A no-op if
+      // the session was already committed.
+      await OdooSessionManager.discardProvisionalSession(previousSession);
       biometricContext.endAccountOperation('account_switch');
       rethrow;
     }
@@ -601,7 +671,8 @@ class SwitchAccountWidget extends StatelessWidget {
     showDialog(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        backgroundColor: isDark ? Colors.grey[900] : Colors.white,
+        backgroundColor: isDark ? AppTheme.darkSurface : Colors.white,
+        elevation: 0,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Row(
           children: [
@@ -609,13 +680,13 @@ class SwitchAccountWidget extends StatelessWidget {
               width: 40,
               height: 40,
               decoration: BoxDecoration(
-                color: Colors.red.shade50,
+                color: StatusColors.red.withValues(alpha: 0.1),
                 shape: BoxShape.circle,
               ),
               child: Icon(
                 Icons.error_outline_rounded,
                 size: 24,
-                color: Colors.red.shade400,
+                color: StatusColors.red,
               ),
             ),
             const SizedBox(width: 12),
@@ -651,42 +722,51 @@ class SwitchAccountWidget extends StatelessWidget {
   ) async {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: isDark ? Colors.grey[900] : Colors.white,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text(
-          'Remove Account',
-          style: TextStyle(
-            fontWeight: FontWeight.w600,
-            color: isDark ? Colors.white : Colors.black87,
-          ),
-        ),
-        content: Text(
-          'Are you sure you want to remove ${account['userName']} from your saved accounts?',
-          style: TextStyle(color: isDark ? Colors.grey[300] : Colors.grey[700]),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: Text(
-              'Cancel',
-              style: TextStyle(
-                color: isDark ? Colors.grey[400] : Colors.grey[600],
-              ),
-            ),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.red[600],
-              foregroundColor: Colors.white,
-            ),
-            child: const Text('Remove'),
-          ),
-        ],
-      ),
+    // final confirmed = await showDialog<bool>(
+    //   context: context,
+    //   builder: (ctx) => AlertDialog(
+    //     backgroundColor: isDark ? Colors.grey[900] : Colors.white,
+    //     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+    //     title: Text(
+    //       'Remove Account',
+    //       style: TextStyle(
+    //         fontWeight: FontWeight.w600,
+    //         color: isDark ? Colors.white : Colors.black87,
+    //       ),
+    //     ),
+    //     content: Text(
+    //       'Are you sure you want to remove ${account['userName']} from your saved accounts?',
+    //       style: TextStyle(color: isDark ? Colors.grey[300] : Colors.grey[700]),
+    //     ),
+    //     actions: [
+    //       TextButton(
+    //         onPressed: () => Navigator.pop(ctx, false),
+    //         child: Text(
+    //           'Cancel',
+    //           style: TextStyle(
+    //             color: isDark ? Colors.grey[400] : Colors.grey[600],
+    //           ),
+    //         ),
+    //       ),
+    //       ElevatedButton(
+    //         onPressed: () => Navigator.pop(ctx, true),
+    //         style: ElevatedButton.styleFrom(
+    //           backgroundColor: Colors.red[600],
+    //           foregroundColor: Colors.white,
+    //         ),
+    //         child: const Text('Remove'),
+    //       ),
+    //     ],
+    //   ),
+    // );
+    final confirmed = await CommonDialog.confirm(
+      context,
+      title: 'Remove Account',
+      message:
+      'Are you sure you want to remove ${account['userName']} from your saved accounts?',
+      confirmText: 'Remove',
+      cancelText: 'Cancel',
+
     );
 
     if (confirmed == true) {

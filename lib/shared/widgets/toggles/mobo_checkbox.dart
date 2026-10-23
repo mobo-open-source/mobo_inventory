@@ -12,7 +12,7 @@ class MoboCheckbox extends StatefulWidget {
     required this.value,
     required this.onChanged,
     this.size = 22,
-    this.radius = 6,
+    this.radius = AppRadius.xs,
   });
 
   @override
@@ -31,9 +31,7 @@ class _MoboCheckboxState extends State<MoboCheckbox> {
       onEnter: (_) => setState(() => _hovering = true),
       onExit: (_) => setState(() => _hovering = false),
       child: GestureDetector(
-        onTap: isDisabled
-            ? null
-            : () => widget.onChanged!(!widget.value),
+        onTap: isDisabled ? null : () => widget.onChanged!(!widget.value),
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 150),
           curve: Curves.easeInOut,
@@ -41,26 +39,18 @@ class _MoboCheckboxState extends State<MoboCheckbox> {
           height: widget.size,
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(widget.radius),
-            border: Border.all(
-              color: primary,
-              width: 2,
-            ),
+            // §7 square checkbox: 1.5px primary border, primary fill when
+            // checked.
+            border: Border.all(color: primary, width: 1.5),
             color: widget.value
                 ? primary
-                : (_hovering
-                ? primary.withOpacity(0.10)
-                : Colors.transparent),
+                : (_hovering ? primary.withOpacity(0.10) : Colors.transparent),
           ),
           child: widget.value
-              ? const Icon(
-            Icons.check_rounded,
-            size: 14,
-            color: Colors.white,
-          )
+              ? const Icon(Icons.check_rounded, size: 14, color: Colors.white)
               : null,
         ),
       ),
     );
   }
 }
-

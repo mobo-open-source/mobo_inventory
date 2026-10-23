@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../core/theme/app_theme.dart';
 
 class OdooDropdownTile extends StatelessWidget {
   final String title;
@@ -53,7 +54,7 @@ class OdooDropdownTile extends StatelessWidget {
     return ListTile(
       leading: Icon(
         icon,
-        color: isDark ? Colors.grey[400] : Colors.black,
+        color: isDark ? Colors.white : Colors.black,
         size: 22,
       ),
       title: Text(
@@ -112,6 +113,16 @@ class OdooDropdownTile extends StatelessWidget {
                     : null,
                 onChanged: onChanged,
                 underline: const SizedBox(),
+                icon: Icon(
+                  Icons.keyboard_arrow_down_sharp,
+                  color: isDark ? Colors.grey[400] : Colors.grey[600],
+                ),
+                borderRadius: BorderRadius.circular(AppRadius.lg),
+                elevation: 4,
+                menuMaxHeight: 320,
+                dropdownColor: isDark
+                    ? AppTheme.darkPopupSurface
+                    : Colors.white,
                 selectedItemBuilder: (context) {
                   return effectiveOptions.map((option) {
                     final String displayText =

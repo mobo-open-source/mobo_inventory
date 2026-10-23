@@ -270,7 +270,7 @@ class _GetStartedScreenState extends State<GetStartedScreen> {
         SizedBox(height: isDesktop ? 30 : 40),
         SizedBox(
           width: double.infinity,
-          height: isDesktop ? 45 : 55,
+          height: 48,
           child: ElevatedButton(
             onPressed: () async {
               await _markGetStartedSeen();
@@ -281,15 +281,15 @@ class _GetStartedScreenState extends State<GetStartedScreen> {
               backgroundColor: theme.primaryColor,
               foregroundColor: Colors.white,
               shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(4),
+                borderRadius: BorderRadius.circular(12),
               ),
               elevation: 0,
             ),
             child: Text(
               'Get Started',
               style: GoogleFonts.inter(
-                fontSize: isDesktop ? 18 : 17,
-                fontWeight: FontWeight.w600,
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
                 letterSpacing: 0.3,
               ),
             ),

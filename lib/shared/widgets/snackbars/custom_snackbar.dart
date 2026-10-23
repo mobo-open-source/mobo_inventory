@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/theme/app_theme.dart';
+
 enum SnackbarType { info, success, warning, error }
 
 /// A utility class for displaying styled snackbars for success, error, and informational messages.
@@ -38,15 +40,21 @@ class CustomSnackbar {
         barrierDismissible: true,
         barrierColor: Colors.black.withOpacity(0.1),
         builder: (dialogContext) {
-          bool _popped = false;
+          // Closes this snackbar only. `Navigator.pop` closes whatever route
+          // is on top: once the snackbar was dismissed by a tap outside it
+          // (and was still animating out), or with a route pushed above it,
+          // the timer closed the page underneath instead.
+          final route = ModalRoute.of(dialogContext);
           void _safePop() {
-            if (_popped) return;
-            _popped = true;
-            if (dialogContext.mounted) {
-              try {
-                Navigator.of(dialogContext).pop();
-              } catch (e) {}
-            }
+            final navigator = route?.navigator;
+            if (route == null || navigator == null || !route.isActive) return;
+            try {
+              if (route.isCurrent) {
+                navigator.pop();
+              } else {
+                navigator.removeRoute(route);
+              }
+            } catch (e) {}
           }
 
           Future.delayed(duration, () {
@@ -162,8 +170,8 @@ class CustomSnackbar {
       case SnackbarType.info:
         return _SnackbarColors(
           icon: Icons.info_outline,
-          iconColor: Colors.blue[300]!,
-          iconBackgroundColor: Colors.blue.withValues(alpha: 0.2),
+          iconColor: StatusColors.infoIcon,
+          iconBackgroundColor: StatusColors.backgroundDark(StatusColors.blue),
           backgroundColor: isDark
               ? const Color(0xFF2D3748)
               : const Color(0xFF4A5568),
@@ -171,8 +179,8 @@ class CustomSnackbar {
       case SnackbarType.success:
         return _SnackbarColors(
           icon: Icons.check_circle_outline,
-          iconColor: Colors.green[300]!,
-          iconBackgroundColor: Colors.green.withValues(alpha: 0.2),
+          iconColor: StatusColors.successIcon,
+          iconBackgroundColor: StatusColors.backgroundDark(StatusColors.green),
           backgroundColor: isDark
               ? const Color(0xFF2D4A3D)
               : const Color(0xFF4A6B5A),
@@ -180,8 +188,8 @@ class CustomSnackbar {
       case SnackbarType.warning:
         return _SnackbarColors(
           icon: Icons.warning_outlined,
-          iconColor: Colors.orange[300]!,
-          iconBackgroundColor: Colors.orange.withValues(alpha: 0.2),
+          iconColor: StatusColors.warningIcon,
+          iconBackgroundColor: StatusColors.backgroundDark(StatusColors.orange),
           backgroundColor: isDark
               ? const Color(0xFF4A3D2D)
               : const Color(0xFF6B5A4A),
@@ -189,8 +197,8 @@ class CustomSnackbar {
       case SnackbarType.error:
         return _SnackbarColors(
           icon: Icons.error_outline,
-          iconColor: Colors.red[300]!,
-          iconBackgroundColor: Colors.red.withValues(alpha: 0.2),
+          iconColor: StatusColors.errorIcon,
+          iconBackgroundColor: StatusColors.backgroundDark(StatusColors.red),
           backgroundColor: isDark
               ? const Color(0xFF4A2D2D)
               : const Color(0xFF6B4A4A),

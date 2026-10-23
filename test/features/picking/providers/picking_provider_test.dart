@@ -135,6 +135,86 @@ void main() {
       expect(provider.states, ['done']);
     });
 
+    test(
+      'a list opened on the To Process states fetches and counts them',
+      () async {
+        final toProcess = PickingProvider(
+          pickingTypeCode: 'outgoing',
+          initialStates: PickingService.toProcessStates,
+          service: mockService,
+        );
+        expect(toProcess.states, PickingService.toProcessStates);
+
+        when(
+          () => mockService.loadCachedPickings(any()),
+        ).thenAnswer((_) async => []);
+        when(
+          () => mockService.fetchPickings(
+            pickingTypeCode: any(named: 'pickingTypeCode'),
+            limit: any(named: 'limit'),
+            offset: any(named: 'offset'),
+            searchQuery: any(named: 'searchQuery'),
+            states: any(named: 'states'),
+            startDate: any(named: 'startDate'),
+            endDate: any(named: 'endDate'),
+          ),
+        ).thenAnswer((_) async => []);
+        when(
+          () => mockService.getPickingCount(
+            pickingTypeCode: any(named: 'pickingTypeCode'),
+            searchQuery: any(named: 'searchQuery'),
+            states: any(named: 'states'),
+            startDate: any(named: 'startDate'),
+            endDate: any(named: 'endDate'),
+          ),
+        ).thenAnswer((_) async => 28);
+        when(
+          () => mockService.cachePickings(any(), any()),
+        ).thenAnswer((_) async {});
+
+        await toProcess.fetchPickings();
+
+        // The total — what the pagination shows — is counted with exactly the
+        // states the dashboard card counts.
+        verify(
+          () => mockService.getPickingCount(
+            pickingTypeCode: 'outgoing',
+            searchQuery: null,
+            states: PickingService.toProcessStates,
+            startDate: null,
+            endDate: null,
+          ),
+        ).called(1);
+        expect(toProcess.totalCount, 28);
+        // Its default view is cached apart from the unfiltered list's.
+        verify(
+          () => mockService.loadCachedPickings('outgoing_assigned'),
+        ).called(1);
+        verify(
+          () => mockService.cachePickings('outgoing_assigned', []),
+        ).called(1);
+
+        toProcess.clearFilters();
+        expect(toProcess.states, isEmpty);
+        toProcess.resetState();
+        expect(toProcess.states, PickingService.toProcessStates);
+      },
+    );
+
+    test('To Process is what Odoo counts as To Process', () {
+      expect(PickingService.toProcessStates, ['assigned']);
+      expect(
+        PickingService.buildDomain(
+          pickingTypeCode: 'incoming',
+          states: PickingService.toProcessStates,
+        ),
+        [
+          ['picking_type_code', '=', 'incoming'],
+          ['state', '=', 'assigned'],
+        ],
+      );
+    });
+
     test('clearFilters resets state', () {
       provider.fetchPickings(searchQuery: 'test');
       provider.setGroupBy('state');

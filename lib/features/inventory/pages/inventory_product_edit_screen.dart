@@ -1,6 +1,5 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:mobo_inv_app/core/routing/app_routes.dart';
 import 'package:mobo_inv_app/shared/widgets/snackbars/custom_snackbar.dart';
@@ -9,17 +8,28 @@ import 'package:hugeicons/hugeicons.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:shimmer/shimmer.dart';
 import '../../../core/const/app_colors.dart';
+import '../../../core/theme/app_theme.dart';
 import '../../../shared/widgets/dialogs/confirm_discard_dialog.dart';
-import '../../../shared/widgets/forms/custom_dropdown_field.dart';
-import '../../../shared/widgets/forms/custom_text_field.dart';
+import '../../../shared/widgets/empty_state.dart';
+import '../../../shared/widgets/forms/mobo_form_field.dart';
+import '../../../shared/widgets/forms/mobo_typeahead_dropdown_field.dart';
+import '../../../shared/widgets/mobo/mobo_multi_select_field.dart';
 import '../viewmodels/inventory_product_edit_view_model.dart';
+import '../utils/inventory_access.dart';
 import '../../../core/services/haptics_service.dart';
 
-/// Screen for editing an existing product's details and uploading product images.
+/// The product form: edits `product.product` [productId], or creates a new
+/// product when [productId] is null.
 class InventoryProductEditScreen extends StatefulWidget {
-  final int productId;
+  /// The `product.product` to edit; null opens the form in create mode.
+  final int? productId;
 
-  const InventoryProductEditScreen({super.key, required this.productId});
+  /// Supplied by tests; the screen otherwise makes (and disposes) its own.
+  final InventoryProductEditViewModel? viewModel;
+
+  const InventoryProductEditScreen({super.key, this.productId, this.viewModel});
+
+  bool get isCreateMode => productId == null;
 
   @override
   State<InventoryProductEditScreen> createState() =>
@@ -36,11 +46,29 @@ class _InventoryProductEditScreenState
   final _costPriceCtrl = TextEditingController();
   final _weightCtrl = TextEditingController();
   final _volumeCtrl = TextEditingController();
-  final _leadTimeCtrl = TextEditingController();
   final _descriptionCtrl = TextEditingController();
 
   final ImagePicker _picker = ImagePicker();
   bool _controllersInitialized = false;
+
+  late final InventoryProductEditViewModel _vm;
+
+  @override
+  void initState() {
+    super.initState();
+    _vm = widget.viewModel ?? InventoryProductEditViewModel();
+    _loadRecord();
+  }
+
+  void _loadRecord() {
+    _controllersInitialized = false;
+    final id = widget.productId;
+    if (id == null) {
+      _vm.initCreate();
+    } else {
+      _vm.load(id);
+    }
+  }
 
   @override
   void dispose() {
@@ -51,13 +79,17 @@ class _InventoryProductEditScreenState
     _costPriceCtrl.dispose();
     _weightCtrl.dispose();
     _volumeCtrl.dispose();
-    _leadTimeCtrl.dispose();
     _descriptionCtrl.dispose();
+    _vm.dispose();
     super.dispose();
   }
 
+  /// Fills the text fields from the loaded record (or the create defaults)
+  /// once, when it arrives. Keyed on [InventoryProductEditViewModel.recordLoaded]
+  /// rather than on the name being non-empty, so a record that loaded with
+  /// odd data still fills every other field.
   void _initializeControllers(InventoryProductEditViewModel vm) {
-    if (!_controllersInitialized && !vm.loading && vm.name.isNotEmpty) {
+    if (!_controllersInitialized && !vm.loading && vm.recordLoaded) {
       _nameCtrl.text = vm.name;
       _skuCtrl.text = vm.sku;
       _barcodeCtrl.text = vm.barcode;
@@ -66,7 +98,6 @@ class _InventoryProductEditScreenState
       _costPriceCtrl.text = vm.standardPrice?.toStringAsFixed(2) ?? '';
       _weightCtrl.text = vm.weight?.toString() ?? '';
       _volumeCtrl.text = vm.volume?.toString() ?? '';
-      _leadTimeCtrl.text = vm.leadTime?.toStringAsFixed(0) ?? '';
       _controllersInitialized = true;
     }
   }
@@ -80,17 +111,20 @@ class _InventoryProductEditScreenState
       return;
     }
 
+    if (vm.categId == null || vm.uomId == null) {
+      CustomSnackbar.showWarning(context, 'Please fill all required fields');
+      return;
+    }
+
+    // Numeric fields are already in the view model (their onChanged keeps it
+    // in step); re-parsing the 2-decimal text here would round a price the
+    // user never touched.
     vm.name = _nameCtrl.text.trim();
     vm.sku = _skuCtrl.text.trim();
     vm.barcode = _barcodeCtrl.text.trim();
     vm.description = _descriptionCtrl.text.trim();
-    vm.listPrice = _parseDouble(_salePriceCtrl.text);
-    vm.standardPrice = _parseDouble(_costPriceCtrl.text);
-    vm.weight = _parseDouble(_weightCtrl.text);
-    vm.volume = _parseDouble(_volumeCtrl.text);
-    vm.leadTime = _parseDouble(_leadTimeCtrl.text);
 
-    final success = await vm.save(widget.productId);
+    final success = await vm.save();
 
     if (!mounted) return;
 
@@ -98,7 +132,13 @@ class _InventoryProductEditScreenState
       HapticsService.success();
       context.pop(true);
     } else {
-      CustomSnackbar.showError(context, vm.error ?? 'Failed to save product');
+      CustomSnackbar.showError(
+        context,
+        vm.error ??
+            (vm.isCreateMode
+                ? 'Failed to create product'
+                : 'Failed to save product'),
+      );
       HapticsService.error();
     }
   }
@@ -136,9 +176,9 @@ class _InventoryProductEditScreenState
 
     showModalBottomSheet(
       context: context,
-      backgroundColor: isDark ? Colors.grey[900] : Colors.white,
+      backgroundColor: isDark ? AppTheme.darkSurface : Colors.grey[50],
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
       builder: (context) {
         return SafeArea(
@@ -148,9 +188,9 @@ class _InventoryProductEditScreenState
               Container(
                 width: 40,
                 height: 4,
-                margin: const EdgeInsets.symmetric(vertical: 12),
+                margin: const EdgeInsets.only(top: 12, bottom: 8),
                 decoration: BoxDecoration(
-                  color: Colors.grey[400],
+                  color: isDark ? Colors.grey[700] : Colors.grey[300],
                   borderRadius: BorderRadius.circular(2),
                 ),
               ),
@@ -172,10 +212,10 @@ class _InventoryProductEditScreenState
               ),
               if (vm.imageBase64 != null)
                 ListTile(
-                  leading: const Icon(Icons.delete, color: Colors.red),
+                  leading: const Icon(Icons.delete, color: StatusColors.red),
                   title: const Text(
                     'Remove Image',
-                    style: TextStyle(color: Colors.red),
+                    style: TextStyle(color: StatusColors.red),
                   ),
                   onTap: () {
                     context.pop();
@@ -190,28 +230,33 @@ class _InventoryProductEditScreenState
     );
   }
 
-  Future<void> _scanBarcode() async {
+  Future<void> _scanBarcode(InventoryProductEditViewModel vm) async {
     final result = await context.pushNamed<String>(AppRoutes.barcodeScanner);
     if (result != null && result.isNotEmpty) {
       _barcodeCtrl.text = result;
+      vm.setBarcode(result);
     }
   }
 
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final access = InventoryAccess.watch(context);
+    // The save button is withheld from users Odoo would refuse anyway.
+    final canSubmit = widget.isCreateMode
+        ? access.canCreateProducts
+        : access.canEditProducts;
 
-    return ChangeNotifierProvider(
-      create: (_) => InventoryProductEditViewModel()..load(widget.productId),
+    return ChangeNotifierProvider<InventoryProductEditViewModel>.value(
+      value: _vm,
       child: Consumer<InventoryProductEditViewModel>(
         builder: (context, vm, _) {
           _initializeControllers(vm);
 
-          final hasUnsavedChanges = vm.hasUnsavedChanges;
-
           return PopScope(
-            canPop: false,
-            onPopInvoked: (didPop) async {
+            // Only ask before leaving when there is something to lose.
+            canPop: !vm.hasUnsavedChanges,
+            onPopInvokedWithResult: (didPop, _) async {
               if (didPop) return;
 
               final discard = await ConfirmDiscardDialog.show(context);
@@ -220,17 +265,18 @@ class _InventoryProductEditScreenState
               }
             },
             child: Scaffold(
-              backgroundColor: isDark ? Colors.grey[900] : Colors.white,
               appBar: AppBar(
                 leading: IconButton(
                   icon: Icon(
                     HugeIcons.strokeRoundedArrowLeft01,
                     color: isDark ? Colors.white : Colors.black,
                   ),
-                  onPressed: () => context.pop(),
+                  // maybePop, so the unsaved-changes check above applies to
+                  // this button as well as to the system back gesture.
+                  onPressed: () => Navigator.of(context).maybePop(),
                 ),
                 title: Text(
-                  'Edit Product',
+                  widget.isCreateMode ? 'Create Product' : 'Edit Product',
                   style: TextStyle(
                     color: isDark ? Colors.white : Colors.black,
                     fontSize: 20,
@@ -241,22 +287,21 @@ class _InventoryProductEditScreenState
                 foregroundColor: isDark ? Colors.white : primaryColor,
                 elevation: 0,
                 actions: [
-                  IconButton(
-                    icon: Icon(
-                      Icons.refresh,
-                      color: isDark ? Colors.white : Colors.black,
+                  if (!widget.isCreateMode)
+                    IconButton(
+                      tooltip: 'Reload',
+                      icon: Icon(
+                        Icons.refresh,
+                        color: isDark ? Colors.white : Colors.black,
+                      ),
+                      onPressed: vm.loading ? null : _loadRecord,
                     ),
-                    onPressed: vm.loading
-                        ? null
-                        : () {
-                            _controllersInitialized = false;
-                            vm.load(widget.productId);
-                          },
-                  ),
                 ],
               ),
               body: vm.loading
                   ? _buildShimmerLoading(isDark)
+                  : !vm.recordLoaded
+                  ? _buildLoadError(vm)
                   : Form(
                       key: _formKey,
                       child: ListView(
@@ -265,174 +310,209 @@ class _InventoryProductEditScreenState
                           _buildImageSection(vm, isDark),
                           const SizedBox(height: 24),
 
-                          CustomTextField(
-                            labelText: 'Product Name *',
+                          MoboFormField(
+                            label: 'Product Name',
+                            isRequired: true,
                             controller: _nameCtrl,
                             hintText: 'Enter product name',
                             validator: (v) => (v?.trim().isEmpty ?? true)
                                 ? 'Product name is required'
                                 : null,
+                            onChanged: vm.setName,
                             isDark: isDark,
                           ),
                           const SizedBox(height: 20),
 
-                          CustomTextField(
+                          MoboFormField(
                             controller: _skuCtrl,
-                            labelText: 'SKU/Default Code',
+                            label: 'SKU/Default Code',
                             hintText: 'Enter SKU',
+                            onChanged: vm.setSku,
                             isDark: isDark,
                           ),
                           const SizedBox(height: 20),
 
-                          CustomTextField(
-                            labelText: 'Barcode',
+                          MoboFormField(
+                            label: 'Barcode',
                             controller: _barcodeCtrl,
                             hintText: 'Enter barcode or scan using camera',
+                            onChanged: vm.setBarcode,
                             isDark: isDark,
-                            suffixIcon: IconButton(
+                            suffixWidget: IconButton(
                               icon: Icon(
                                 HugeIcons.strokeRoundedScanImage,
                                 size: 24,
                               ),
-                              onPressed: _scanBarcode,
+                              onPressed: () => _scanBarcode(vm),
                             ),
                           ),
                           const SizedBox(height: 20),
 
-                          CustomDropdownField(
-                            value: vm.categId?.toString(),
-                            labelText: 'Category',
+                          MoboTypeaheadDropdownField<String>(
+                            label: 'Category',
+                            isRequired: true,
                             hintText: 'Select category',
                             isDark: isDark,
-                            items: vm.categoryOptions
-                                .map(
-                                  (opt) => DropdownMenuItem<String>(
-                                    value: opt['value']!,
-                                    child: Text(opt['label']!),
-                                  ),
-                                )
-                                .toList(),
+                            selectedItem: vm.categId?.toString(),
+                            items: [
+                              for (final opt in vm.categoryOptions)
+                                opt['value']!,
+                            ],
+                            displayText: (val) =>
+                                vm.categoryOptions.firstWhere(
+                                  (opt) => opt['value'] == val,
+                                  orElse: () => const {},
+                                )['label'] ??
+                                val,
                             onChanged: (val) => vm.setCategory(
                               val == null ? null : int.tryParse(val),
                             ),
                           ),
                           const SizedBox(height: 20),
 
-                          CustomTextField(
+                          MoboFormField(
                             controller: _salePriceCtrl,
-                            labelText: 'List Price',
+                            label: 'List Price',
                             hintText: '0.00',
                             keyboardType: const TextInputType.numberWithOptions(
                               decimal: true,
                             ),
                             isDark: isDark,
                             validator: _validatePrice,
+                            onChanged: (v) => vm.setListPrice(_parseDouble(v)),
                           ),
                           const SizedBox(height: 20),
 
-                          CustomTextField(
+                          MoboFormField(
                             controller: _costPriceCtrl,
-                            labelText: 'Cost Price',
+                            label: 'Cost Price',
                             hintText: '0.00',
                             keyboardType: const TextInputType.numberWithOptions(
                               decimal: true,
                             ),
                             isDark: isDark,
                             validator: _validatePrice,
+                            onChanged: (v) =>
+                                vm.setStandardPrice(_parseDouble(v)),
                           ),
                           const SizedBox(height: 20),
 
-                          CustomDropdownField(
-                            value: (vm.taxes.isNotEmpty ? vm.taxes.first : null)
-                                ?.toString(),
-                            labelText: 'Tax',
-                            hintText: 'Select tax',
-                            isDark: isDark,
-                            items: vm.taxOptions
-                                .map(
-                                  (opt) => DropdownMenuItem<String>(
-                                    value: opt['value']!,
-                                    child: Text(opt['label']!),
-                                  ),
-                                )
-                                .toList(),
-                            onChanged: (val) => vm.setTaxes(
-                              val == null ? [] : [int.parse(val)],
+                          // taxes_id is many2many: a product can carry
+                          // several taxes, so every one must stay selectable
+                          // (the single-select field kept only the first and
+                          // dropped the rest on save). It only exists with
+                          // the Invoicing app installed.
+                          if (vm.hasTaxesField) ...[
+                            MoboMultiSelectField<String>(
+                              label: 'Taxes',
+                              panelTitle: 'Select Taxes',
+                              hintText: 'Select taxes',
+                              searchHintText: 'Search taxes...',
+                              selectedItems: [
+                                for (final id in vm.taxes) id.toString(),
+                              ],
+                              items: [
+                                for (final opt in vm.taxOptions) opt['value']!,
+                              ],
+                              displayText: (val) =>
+                                  vm.taxOptions.firstWhere(
+                                    (opt) => opt['value'] == val,
+                                    orElse: () => const {},
+                                  )['label'] ??
+                                  val,
+                              onChanged: (vals) => vm.setTaxes([
+                                for (final v in vals)
+                                  if (int.tryParse(v) != null) int.parse(v),
+                              ]),
                             ),
-                          ),
-                          const SizedBox(height: 20),
+                            const SizedBox(height: 20),
+                          ],
 
-                          CustomDropdownField(
-                            value: vm.uomId?.toString(),
-                            labelText: 'Unit of Measure',
+                          MoboTypeaheadDropdownField<String>(
+                            label: 'Unit of Measure',
+                            isRequired: true,
                             hintText: 'Select unit',
                             isDark: isDark,
-                            items: vm.uomOptions
-                                .map(
-                                  (opt) => DropdownMenuItem<String>(
-                                    value: opt['value']!,
-                                    child: Text(opt['label']!),
-                                  ),
-                                )
-                                .toList(),
+                            selectedItem: vm.uomId?.toString(),
+                            items: [
+                              for (final opt in vm.uomOptions) opt['value']!,
+                            ],
+                            displayText: (val) =>
+                                vm.uomOptions.firstWhere(
+                                  (opt) => opt['value'] == val,
+                                  orElse: () => const {},
+                                )['label'] ??
+                                val,
                             onChanged: (val) => vm.setUom(
                               val == null ? null : int.tryParse(val),
                             ),
                           ),
                           const SizedBox(height: 20),
 
-                          CustomDropdownField(
-                            value: vm.currencyId?.toString(),
-                            labelText: 'Currency',
+                          MoboTypeaheadDropdownField<String>(
+                            label: 'Currency',
                             hintText: 'Select currency',
                             isDark: isDark,
-                            items: vm.currencyOptions
-                                .map(
-                                  (opt) => DropdownMenuItem<String>(
-                                    value: opt['value']!,
-                                    child: Text(opt['label']!),
-                                  ),
-                                )
-                                .toList(),
+                            selectedItem: vm.currencyId?.toString(),
+                            items: [
+                              for (final opt in vm.currencyOptions)
+                                opt['value']!,
+                            ],
+                            displayText: (val) =>
+                                vm.currencyOptions.firstWhere(
+                                  (opt) => opt['value'] == val,
+                                  orElse: () => const {},
+                                )['label'] ??
+                                val,
                             onChanged: (val) => vm.setCurrency(
                               val == null ? null : int.tryParse(val),
                             ),
                           ),
                           const SizedBox(height: 20),
 
-                          CustomTextField(
+                          MoboFormField(
                             controller: _weightCtrl,
-                            labelText: 'Weight',
+                            label: 'Weight',
                             hintText: '0.0',
                             keyboardType: const TextInputType.numberWithOptions(
                               decimal: true,
                             ),
                             isDark: isDark,
                             validator: _validateNumber,
+                            onChanged: (v) => vm.setWeight(_parseDouble(v)),
                           ),
                           const SizedBox(height: 20),
 
-                          CustomTextField(
+                          MoboFormField(
                             controller: _volumeCtrl,
-                            labelText: 'Volume',
+                            label: 'Volume',
                             hintText: '0.0',
                             keyboardType: const TextInputType.numberWithOptions(
                               decimal: true,
                             ),
                             isDark: isDark,
                             validator: _validateNumber,
+                            onChanged: (v) => vm.setVolume(_parseDouble(v)),
                           ),
                           const SizedBox(height: 20),
 
-                          CustomTextField(
+                          MoboFormField(
                             controller: _descriptionCtrl,
-                            labelText: 'Description',
+                            label: 'Description',
                             hintText: 'Enter product description',
                             maxLines: 4,
                             isDark: isDark,
+                            onChanged: vm.setDescription,
                           ),
                           const SizedBox(height: 24),
 
+                          if (widget.isCreateMode && vm.canTrackInventory)
+                            _buildCheckboxTile(
+                              'Track Inventory',
+                              vm.trackInventory,
+                              vm.setTrackInventory,
+                              isDark,
+                            ),
                           _buildCheckboxTile(
                             'Active',
                             vm.isActive,
@@ -454,39 +534,48 @@ class _InventoryProductEditScreenState
 
                           const SizedBox(height: 32),
 
-                          SizedBox(
-                            width: double.infinity,
-                            height: 54,
-                            child: ElevatedButton(
-                              onPressed: vm.saving
-                                  ? null
-                                  : () => _saveProduct(vm),
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: primaryColor,
-                                foregroundColor: Colors.white,
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(12),
+                          if (canSubmit)
+                            SizedBox(
+                              width: double.infinity,
+                              height: 48,
+                              child: ElevatedButton(
+                                onPressed: vm.canSave
+                                    ? () => _saveProduct(vm)
+                                    : null,
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: primaryColor,
+                                  foregroundColor: Colors.white,
+                                  disabledBackgroundColor: isDark
+                                      ? Colors.grey[700]
+                                      : Colors.grey[300],
+                                  disabledForegroundColor: isDark
+                                      ? Colors.grey[400]
+                                      : Colors.grey[500],
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  elevation: 0,
                                 ),
-                                elevation: 0,
+                                child: vm.saving
+                                    ? const SizedBox(
+                                        width: 24,
+                                        height: 24,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2.5,
+                                          color: Colors.white,
+                                        ),
+                                      )
+                                    : Text(
+                                        widget.isCreateMode
+                                            ? 'Create Product'
+                                            : 'Save Changes',
+                                        style: const TextStyle(
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
                               ),
-                              child: vm.saving
-                                  ? const SizedBox(
-                                      width: 24,
-                                      height: 24,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 2.5,
-                                        color: Colors.white,
-                                      ),
-                                    )
-                                  : const Text(
-                                      'Save Changes',
-                                      style: TextStyle(
-                                        fontSize: 16,
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                    ),
                             ),
-                          ),
                           const SizedBox(height: 32),
                         ],
                       ),
@@ -499,16 +588,20 @@ class _InventoryProductEditScreenState
   }
 
   Widget _buildImageSection(InventoryProductEditViewModel vm, bool isDark) {
+    final bytes = vm.imageBytes;
+    final placeholder = Icon(
+      Icons.image,
+      size: 48,
+      color: isDark ? Colors.grey[600] : Colors.grey[400],
+    );
+
     return Center(
       child: GestureDetector(
         onTap: () {
-          if (vm.imageBase64 != null) {
+          if (bytes != null) {
             context.pushNamed(
               AppRoutes.fullImage,
-              extra: {
-                'imageBytes': base64Decode(vm.imageBase64!),
-                'title': vm.name,
-              },
+              extra: {'imageBytes': bytes, 'title': vm.name},
             );
           } else {
             _showImageOptions(vm);
@@ -517,25 +610,22 @@ class _InventoryProductEditScreenState
         child: Stack(
           children: [
             Container(
+              key: const ValueKey('productImage'),
               width: 140,
               height: 140,
+              clipBehavior: Clip.antiAlias,
               decoration: BoxDecoration(
-                color: isDark ? Colors.grey[800] : const Color(0xFFF5E6F0),
+                color: isDark ? Colors.grey[800] : Colors.grey[200],
                 shape: BoxShape.circle,
-                image: vm.imageBase64 != null
-                    ? DecorationImage(
-                        image: MemoryImage(base64Decode(vm.imageBase64!)),
-                        fit: BoxFit.cover,
-                      )
-                    : null,
               ),
-              child: vm.imageBase64 == null
-                  ? Icon(
-                      Icons.image,
-                      size: 48,
-                      color: isDark ? Colors.grey[600] : Colors.grey[400],
+              child: bytes != null
+                  ? Image.memory(
+                      bytes,
+                      fit: BoxFit.cover,
+                      gaplessPlayback: true,
+                      errorBuilder: (_, __, ___) => Center(child: placeholder),
                     )
-                  : null,
+                  : Center(child: placeholder),
             ),
             Positioned(
               bottom: 0,
@@ -543,15 +633,17 @@ class _InventoryProductEditScreenState
               child: GestureDetector(
                 onTap: () => _showImageOptions(vm),
                 child: Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: const BoxDecoration(
-                    color: Color(0xFFD81B60),
+                  width: 36,
+                  height: 36,
+                  decoration: BoxDecoration(
+                    color: primaryColor,
                     shape: BoxShape.circle,
+                    border: Border.all(color: Colors.white, width: 3),
                   ),
                   child: const Icon(
                     Icons.camera_alt,
                     color: Colors.white,
-                    size: 20,
+                    size: 18,
                   ),
                 ),
               ),
@@ -559,6 +651,23 @@ class _InventoryProductEditScreenState
           ],
         ),
       ),
+    );
+  }
+
+  /// Shown instead of the form when the product could not be read, so a
+  /// failed load never looks like an empty "new product" form.
+  Widget _buildLoadError(InventoryProductEditViewModel vm) {
+    return ListView(
+      children: [
+        const SizedBox(height: 48),
+        EmptyState(
+          title: 'Couldn\'t load this product',
+          subtitle: vm.error ?? 'Something went wrong while loading it.',
+          lottieAsset: 'assets/lotties/Error 404.json',
+          actionLabel: 'Retry',
+          onAction: _loadRecord,
+        ),
+      ],
     );
   }
 
@@ -635,7 +744,7 @@ class _InventoryProductEditScreenState
                   height: 48,
                   decoration: BoxDecoration(
                     color: Colors.white,
-                    borderRadius: BorderRadius.circular(8),
+                    borderRadius: BorderRadius.circular(12),
                   ),
                 ),
                 const SizedBox(height: 20),
@@ -645,7 +754,7 @@ class _InventoryProductEditScreenState
 
           Container(
             width: double.infinity,
-            height: 54,
+            height: 48,
             decoration: BoxDecoration(
               color: Colors.white,
               borderRadius: BorderRadius.circular(12),

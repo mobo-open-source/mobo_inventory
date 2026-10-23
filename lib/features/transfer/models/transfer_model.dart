@@ -1,3 +1,5 @@
+import '../../../core/utils/odoo_value.dart';
+
 /// Represents an internal stock transfer (picking) in Odoo.
 class InternalTransfer {
   final int? id;
@@ -54,7 +56,7 @@ class InternalTransfer {
               (json['location_dest_id'] as List).length > 1
           ? (json['location_dest_id'] as List)[1].toString()
           : null,
-      scheduledDate: json['scheduled_date']?.toString(),
+      scheduledDate: odooString(json['scheduled_date']),
       state: json['state']?.toString() ?? 'draft',
     );
   }
@@ -129,7 +131,8 @@ class TransferLine {
           ? (json['product_id'] as List)[1].toString()
           : null,
       quantity: (json['product_uom_qty'] ?? json['quantity'] ?? 0).toDouble(),
-      productUom: json['product_uom']?.toString(),
+      // `uom_id` is the Odoo 20 name of stock.move.product_uom.
+      productUom: (json['product_uom'] ?? json['uom_id'])?.toString(),
       unitPrice: (json['price_unit'] ?? json['unit_price'] ?? 0.0).toDouble(),
     );
   }
